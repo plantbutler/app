@@ -26,7 +26,14 @@ by ntfy.
 
 Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, theming.
 
-## When you start
+## Toolchain (picked 2026-09-01, CLI-only)
 
-Write the toolchain versions (Android Studio, JDK, compileSdk, Compose BOM) into this file the
-day you pick them, so the next session does not rediscover them.
+No Android Studio: `brew install openjdk@17` and `brew install --cask
+android-commandlinetools` (SDK root `/opt/homebrew/share/android-commandlinetools`,
+`sdk.dir` in the untracked `local.properties`), platforms;android-35 +
+build-tools via sdkmanager. Gradle 8.11.1 by wrapper, AGP 8.7.3, Kotlin 2.1.0,
+Compose BOM 2024.12.01, minSdk 31, target/compileSdk 35, JDK 17
+(`JAVA_HOME=/opt/homebrew/opt/openjdk@17`). Build: `./gradlew test assembleDebug`;
+the APK lands in `app/build/outputs/apk/debug/`. The backend URL and token bake
+into BuildConfig from the untracked `butler.properties` (see the .sample).
+Install Android Studio later if the IDE is ever wanted; nothing here needs it.
