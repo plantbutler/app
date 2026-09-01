@@ -37,3 +37,9 @@ Compose BOM 2024.12.01, minSdk 31, target/compileSdk 35, JDK 17
 the APK lands in `app/build/outputs/apk/debug/`. The backend URL and token bake
 into BuildConfig from the untracked `butler.properties` (see the .sample).
 Install Android Studio later if the IDE is ever wanted; nothing here needs it.
+
+Deployed reality (2026-09-01): the backend is reached over Tailscale — the NAS
+is device ciccia-1 on the tailnet (Tailscale runs as a docker container on the
+NAS, state in /volume1/docker/tailscale). butler.properties points at the
+tailnet IP, so the app works from any network as long as the phone runs the
+Tailscale app. The demo backend on the laptop was a bootstrap crutch; gone.
