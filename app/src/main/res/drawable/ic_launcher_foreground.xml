@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A white sprout: two leaves and a stem. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,58 C40,58 30,48 30,34 C44,34 54,44 54,58 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,58 C68,58 78,48 78,34 C64,34 54,44 54,58 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M51,56 L57,56 L57,80 L51,80 Z" />
+</vector>

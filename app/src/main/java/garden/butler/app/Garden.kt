@@ -22,14 +22,23 @@ fun splitGarden(all: List<Pot>, health: Health, nowS: Long): Garden {
 }
 
 /** The health strip: the backend's own raised alerts (debounced, the source
- * of truth) plus the two instant states worth showing before the ticker's
- * debounce catches up — deduplicated so one empty reservoir is one line. */
+ * of truth) plus the instant states worth showing on their own —
+ * deduplicated so one empty reservoir is one line. The silent check runs
+ * app-side too: the backend's ticker only pages when ntfy is configured,
+ * and a dark controller must not render a strip-free "healthy" screen. */
 fun problems(health: Health, nowS: Long): List<String> {
     val found = mutableListOf<String>()
-    if (!health.ok) found += "the backend is not ok"
     val raised = health.alerts.map { it.key }.toSet()
     health.alerts.mapTo(found) { describeAlert(it.key, nowS, it.raisedTs) }
     for (c in health.controllers) {
+        val threshold = maxOf(600L, 3L * (c.nextS ?: 60))
+        if (c.lastSeen == 0L) {
+            found += "${c.controller} has never reported"
+        } else if (
+            nowS - c.lastSeen > threshold && "silent:${c.controller}" !in raised
+        ) {
+            found += "${c.controller} last reported ${agoText(c.lastSeen, nowS)}"
+        }
         if (c.float == 0 && "float:${c.controller}" !in raised) {
             found += "reservoir empty on ${c.controller}"
         }
@@ -74,6 +83,15 @@ fun potLine(pot: Pot, nowS: Long): String {
         pot.raw != null && seen != null -> "raw ${pot.raw} · $seen"
         else -> "no data yet"
     }
+}
+
+const val ENV_STALE_S = 7200L
+
+/** A stale env reading must say so: a dead temperature sensor would
+ * otherwise display its last number as current, forever. */
+fun envStale(pot: Pot, nowS: Long): String? {
+    val readTs = pot.readTs ?: return "never read"
+    return if (nowS - readTs > ENV_STALE_S) agoText(readTs, nowS) else null
 }
 
 /** An env: pot's display pair: label without the prefix, value. */

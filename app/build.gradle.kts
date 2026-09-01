@@ -8,8 +8,10 @@ plugins {
 }
 
 // The backend URL and token come from an untracked local file (the plan's
-// "URL and token from an untracked local file"); a missing file fails the
-// build loudly instead of producing an app that talks to nowhere.
+// "URL and token from an untracked local file"); a missing or half-edited
+// file fails the build loudly instead of producing an app that talks to
+// nowhere — and the values are escaped, or a quote in the token would land
+// verbatim in the generated BuildConfig.java.
 val butler =
     Properties().apply {
         val file = rootProject.file("butler.properties")
@@ -18,6 +20,18 @@ val butler =
         }
         file.inputStream().use { load(it) }
     }
+
+val butlerUrl =
+    requireNotNull(butler.getProperty("url")) { "butler.properties is missing url=" }
+val butlerToken =
+    requireNotNull(butler.getProperty("token")) { "butler.properties is missing token=" }
+
+require(butlerUrl.startsWith("http")) {
+    "butler.properties url= must start with http, got '$butlerUrl'"
+}
+
+fun javaQuoted(value: String) =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "garden.butler.app"
@@ -29,8 +43,10 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        buildConfigField("String", "BUTLER_URL", "\"${butler["url"]}\"")
-        buildConfigField("String", "BUTLER_TOKEN", "\"${butler["token"]}\"")
+        buildConfigField("String", "BUTLER_URL", javaQuoted(butlerUrl))
+        // Unused until the water-now pitch; baked already so the properties
+        // file's contract does not change under the next pitch's feet.
+        buildConfigField("String", "BUTLER_TOKEN", javaQuoted(butlerToken))
     }
 
     buildFeatures {
