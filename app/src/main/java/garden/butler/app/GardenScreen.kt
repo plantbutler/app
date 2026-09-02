@@ -1,5 +1,6 @@
 package garden.butler.app
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,12 +13,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -25,33 +30,28 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.delay
-
-private const val REFRESH_EVERY_MS = 60_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GardenScreen(model: GardenViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
-    val owner = LocalLifecycleOwner.current
-    LaunchedEffect(Unit) {
-        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) { // numbers and "ago" labels tick while watched
-                model.refresh()
-                delay(REFRESH_EVERY_MS)
-            }
-        }
-    }
-    Scaffold(topBar = { TopAppBar(title = { Text("Plant Butler") }) }) { padding ->
+    val listNote by model.listNote.collectAsStateWithLifecycle()
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Plant Butler") },
+                actions = {
+                    IconButton(onClick = model::newPot) { Icon(Icons.Default.Add, "New pot") }
+                },
+            )
+        },
+    ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (val it = state) {
                 is UiState.Loading ->
@@ -59,7 +59,7 @@ fun GardenScreen(model: GardenViewModel) {
                 is UiState.Trouble ->
                     Trouble(it, model::refresh, Modifier.align(Alignment.Center))
                 is UiState.Ready ->
-                    GardenList(it.garden, it.refreshing, it.why, model::refresh)
+                    GardenList(it.garden, it.refreshing, it.why, listNote, model)
             }
         }
     }
@@ -84,10 +84,11 @@ private fun GardenList(
     garden: Garden,
     refreshing: Boolean,
     why: String?,
-    refresh: () -> Unit,
+    listNote: String?,
+    model: GardenViewModel,
 ) {
     val nowS = System.currentTimeMillis() / 1000
-    PullToRefreshBox(isRefreshing = refreshing, onRefresh = refresh) {
+    PullToRefreshBox(isRefreshing = refreshing, onRefresh = model::refresh) {
         LazyColumn(Modifier.fillMaxSize()) {
             if (why != null) {
                 item { StaleBanner(why) }
@@ -95,17 +96,41 @@ private fun GardenList(
             if (garden.problems.isNotEmpty()) {
                 item { ProblemStrip(garden.problems) }
             }
-            if (garden.env.isNotEmpty()) {
-                item { EnvCard(garden.env, nowS) }
+            if (garden.health.controllers.isNotEmpty()) {
+                item { ControllersCard(garden.health, nowS, model::resetInterval) }
             }
-            items(garden.pots, key = { it.name }) { pot -> PotRow(pot, nowS) }
-            if (garden.pots.isEmpty()) {
+            if (listNote != null) {
                 item {
                     Text(
-                        "No pots yet — POST /pot on the backend to plant one.",
+                        listNote,
+                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+            if (garden.env.isNotEmpty()) {
+                item { EnvCard(garden.env, nowS, model::open) }
+            }
+            items(garden.pots, key = { it.name }) { pot -> PotRow(pot, nowS, model::open) }
+            if (garden.pots.isEmpty() && garden.disabled.isEmpty() && garden.env.isEmpty()) {
+                item {
+                    Text(
+                        "No pots yet — tap + to plant one.",
                         Modifier.padding(24.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                }
+            }
+            if (garden.disabled.isNotEmpty()) {
+                item {
+                    Text(
+                        "Disabled",
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+                items(garden.disabled, key = { "off:" + it.name }) { pot ->
+                    Box(Modifier.alpha(0.6f)) { PotRow(pot, nowS, model::open) }
                 }
             }
         }
@@ -146,8 +171,30 @@ private fun ProblemStrip(problems: List<String>) {
     }
 }
 
+/** One line per controller; a leftover interval override (a wizard that
+ * could not restore it) gets its reset here. */
 @Composable
-private fun EnvCard(env: List<Pot>, nowS: Long) {
+private fun ControllersCard(health: Health, nowS: Long, reset: (String) -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            health.controllers.forEach { c ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        controllerLine(c, nowS, health.nextDefault),
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (hasOverride(c)) {
+                        AssistChip(onClick = { reset(c.controller) }, label = { Text("reset") })
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnvCard(env: List<Pot>, nowS: Long, open: (String) -> Unit) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Row(
             Modifier.padding(12.dp).fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -155,7 +202,7 @@ private fun EnvCard(env: List<Pot>, nowS: Long) {
         ) {
             env.forEach { pot ->
                 val (label, value) = envEntry(pot)
-                Column {
+                Column(Modifier.clickable { open(pot.name) }) {
                     Text(label, style = MaterialTheme.typography.labelSmall)
                     Text(value, style = MaterialTheme.typography.titleMedium)
                     envStale(pot, nowS)?.let {
@@ -172,15 +219,23 @@ private fun EnvCard(env: List<Pot>, nowS: Long) {
 }
 
 @Composable
-private fun PotRow(pot: Pot, nowS: Long) {
+private fun PotRow(pot: Pot, nowS: Long, open: (String) -> Unit) {
     ListItem(
+        modifier = Modifier.clickable { open(pot.name) },
         headlineContent = { Text(pot.name) },
         supportingContent = {
             Column {
                 Text(potLine(pot, nowS))
-                pot.proposal?.let {
+                pot.proposal?.takeIf { pot.enabled == 1 }?.let {
                     Text(
-                        "proposal waiting: ${it.ml ?: "?"} ml — approve on the backend",
+                        "proposal waiting: ${it.ml ?: "?"} ml",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
+                rowNote(pot, nowS)?.let {
+                    Text(
+                        it,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.tertiary,
                     )
@@ -189,7 +244,7 @@ private fun PotRow(pot: Pot, nowS: Long) {
         },
         trailingContent = {
             if (pot.mode != "manual") {
-                AssistChip(onClick = {}, label = { Text(pot.mode) })
+                AssistChip(onClick = { open(pot.name) }, label = { Text(pot.mode) })
             }
         },
     )

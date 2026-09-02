@@ -2,7 +2,9 @@ package garden.butler.app
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 private fun pot(
     name: String,
@@ -18,7 +20,30 @@ private fun controller(
     nextS: Int? = null,
     float: Int? = null,
     pos: String? = null,
-) = ControllerHealth(name, lastSeen, nextS, float, pos)
+    command: InFlight? = null,
+) = ControllerHealth(name, lastSeen, nextS, float, pos, command)
+
+private fun dose(
+    state: String = "acked",
+    verdict: String? = null,
+    sentTs: Long? = null,
+    ackedTs: Long? = null,
+    ml: Int? = 100,
+    flowMl: Int? = null,
+    source: String? = null,
+) = LastDose(16, ml, 10, flowMl, state, source, sentTs, ackedTs, verdict)
+
+private val complete =
+    Pot(
+        name = "basil",
+        controller = "b1",
+        channel = 0,
+        outlet = 3,
+        dryRaw = 12000,
+        wetRaw = 4000,
+        targetLowPct = 30,
+        doseMl = 100,
+    )
 
 class GardenTest {
     @Test
@@ -35,6 +60,18 @@ class GardenTest {
             )
         assertEquals(listOf("basil"), garden.pots.map { it.name })
         assertEquals(listOf("env:temp"), garden.env.map { it.name })
+        assertEquals(listOf("cactus"), garden.disabled.map { it.name })
+    }
+
+    @Test
+    fun `disabled pots of any name are kept aside and the health travels along`() {
+        val health = Health(ok = true, nextDefault = 30)
+        val garden =
+            splitGarden(listOf(pot("env:hum", enabled = 0), pot("fern", enabled = 0)), health, 1000)
+        assertEquals(listOf("env:hum", "fern"), garden.disabled.map { it.name })
+        assertEquals(emptyList(), garden.pots)
+        assertEquals(emptyList(), garden.env)
+        assertEquals(health, garden.health)
     }
 
     @Test
@@ -86,6 +123,21 @@ class GardenTest {
             )
         val found = problems(paged, nowS = 1000)
         assertEquals(1, found.count { "b1" in it })
+    }
+
+    @Test
+    fun `the default interval comes from the backend, not a baked-in 60`() {
+        val health = Health(ok = true, nextDefault = 300, controllers = listOf(controller(lastSeen = 300)))
+        assertEquals(emptyList(), problems(health, nowS = 1000)) // 700 s < 3 * 300
+        assertEquals(listOf("b1 last reported 16min ago"), problems(health, nowS = 1300))
+    }
+
+    @Test
+    fun `the silence floor is 600 s exactly`() {
+        val quiet = Health(ok = true, controllers = listOf(controller(lastSeen = 400)))
+        assertEquals(emptyList(), problems(quiet, nowS = 1000))
+        val silent = Health(ok = true, controllers = listOf(controller(lastSeen = 399)))
+        assertEquals(listOf("b1 last reported 10min ago"), problems(silent, nowS = 1000))
     }
 
     @Test
@@ -169,5 +221,150 @@ class GardenTest {
         assertNull(envStale(fresh, nowS = 1000 + ENV_STALE_S))
         assertEquals("3h ago", envStale(fresh, nowS = 1000 + 3 * 3600 + 100))
         assertEquals("never read", envStale(pot("env:temp"), nowS = 1000))
+    }
+
+    @Test
+    fun `the controller line reads seen, interval, float and pos`() {
+        assertEquals(
+            "b1 · seen 40s ago · every 60s · float ok · pos ok",
+            controllerLine(controller(lastSeen = 960, float = 1, pos = "ok"), 1000, 60),
+        )
+        assertEquals(
+            "b1 · never reported · every 5s (override) · float EMPTY · pos unknown",
+            controllerLine(controller(nextS = 5, float = 0, pos = "unknown"), 1000, 60),
+        )
+        assertEquals(
+            "b1 · seen 10s ago · every 30s · float ? · pos ?",
+            controllerLine(controller(lastSeen = 990), 1000, 30),
+        )
+        assertEquals(
+            "b1 · seen 10s ago · every 60s · float ok · pos 3",
+            controllerLine(controller(lastSeen = 990, float = 1, pos = "3"), 1000, 60),
+        )
+    }
+
+    @Test
+    fun `the controller line appends the command in flight`() {
+        val water = controller(lastSeen = 990, command = InFlight(17, "water", "sent"))
+        assertTrue(controllerLine(water, 1000, 60).endsWith(" · cmd 17 sent"))
+        val stop = controller(lastSeen = 990, command = InFlight(17, "stop", "sent"))
+        assertTrue(controllerLine(stop, 1000, 60).endsWith(" · cmd 17 stop sent"))
+        assertFalse("cmd" in controllerLine(controller(lastSeen = 990), 1000, 60))
+    }
+
+    @Test
+    fun `an override is a non-null next_s`() {
+        assertTrue(hasOverride(controller(nextS = 5)))
+        assertFalse(hasOverride(controller()))
+    }
+
+    @Test
+    fun `the proposal line says what, how capped and how old`() {
+        assertEquals(
+            "proposal: 100 ml, cap 10 s, made 3min ago",
+            proposalLine(Proposal(17, 100, 10, 820), 1000),
+        )
+        assertEquals("proposal: ? ml", proposalLine(Proposal(17), 1000))
+        assertEquals("proposal: 50 ml, made 5s ago", proposalLine(Proposal(17, 50, null, 995), 1000))
+    }
+
+    @Test
+    fun `the dose line covers source, ago, state and meter`() {
+        assertEquals(
+            "manual dose 100 ml · 40min ago · acked, meter 96 ml",
+            doseLine(dose(source = "manual", sentTs = -3000, ackedTs = -1400, flowMl = 96), 1000),
+        )
+        assertEquals("dose 100 ml · 10s ago · acked", doseLine(dose(ackedTs = 990), 1000))
+        assertEquals(
+            "dose 100 ml · 10s ago · sent, not acked yet",
+            doseLine(dose(state = "sent", sentTs = 990), 1000),
+        )
+        assertEquals(
+            "dose ? ml · expired, never acked",
+            doseLine(dose(state = "expired", ml = null), 1000),
+        )
+        assertFalse("too" in doseLine(dose(ackedTs = 990, verdict = "too_much"), 1000))
+    }
+
+    @Test
+    fun `a verdict is wanted after the soak and within the window`() {
+        val acked = 1000L
+        assertFalse(needsVerdict(dose(ackedTs = acked), acked + SOAK_S))
+        assertTrue(needsVerdict(dose(ackedTs = acked), acked + SOAK_S + 1))
+        assertTrue(needsVerdict(dose(ackedTs = acked), acked + VERDICT_WINDOW_S))
+        assertFalse(needsVerdict(dose(ackedTs = acked), acked + VERDICT_WINDOW_S + 1))
+    }
+
+    @Test
+    fun `no verdict wanted without a dose, an ack, a timestamp or once judged`() {
+        val nowS = 10_000L
+        assertFalse(needsVerdict(null, nowS))
+        assertFalse(needsVerdict(dose(state = "sent", sentTs = 1000), nowS))
+        assertFalse(needsVerdict(dose(state = "expired", sentTs = 1000), nowS))
+        assertFalse(needsVerdict(dose(verdict = "ok", ackedTs = 1000), nowS))
+        assertFalse(needsVerdict(dose(), nowS))
+        assertTrue(needsVerdict(dose(sentTs = 1000), nowS)) // acked without acked_ts
+    }
+
+    @Test
+    fun `the row note nags for a verdict and otherwise stays quiet`() {
+        val judged = Pot("basil", lastDose = dose(ackedTs = 1000))
+        assertEquals("dose 2h ago, not judged yet", rowNote(judged, 1000 + 2 * 3600))
+        assertNull(rowNote(judged, 1000 + 60))
+        assertNull(rowNote(Pot("basil"), 5000))
+    }
+
+    @Test
+    fun `a disabled pot is never nagged`() {
+        val off = Pot("basil", enabled = 0, lastDose = dose(ackedTs = 1000))
+        assertNull(rowNote(off, 1000 + 2 * 3600))
+    }
+
+    @Test
+    fun `learning gaps name every missing prerequisite in order`() {
+        assertEquals(
+            listOf(
+                "a controller", "a channel", "an outlet", "calibration (dry and wet)",
+                "a target low %", "a dose",
+            ),
+            learningGaps(Pot("new")),
+        )
+        val ready = controller(lastSeen = 990, float = 1, pos = "ok")
+        assertEquals(emptyList(), learningGaps(complete, ready))
+        assertEquals(
+            listOf("calibration (dry and wet)"),
+            learningGaps(complete.copy(wetRaw = null), ready),
+        )
+    }
+
+    @Test
+    fun `learning also needs the board's float and pos, which today's firmware omits`() {
+        assertEquals(
+            listOf("the board reporting float=1 and pos=ok (now float ?, pos ?)"),
+            learningGaps(complete, controller(lastSeen = 990)),
+        )
+        assertEquals(
+            listOf("the board reporting float=1 and pos=ok (now float ?, pos ?)"),
+            learningGaps(complete, null),
+        )
+        assertEquals(
+            listOf("the board reporting float=1 and pos=ok (now float 0, pos unknown)"),
+            learningGaps(complete, controller(lastSeen = 990, float = 0, pos = "unknown")),
+        )
+        assertEquals(emptyList(), learningGaps(complete, controller(lastSeen = 990, float = 1, pos = "ok")))
+        val unmapped = complete.copy(controller = null)
+        assertEquals(listOf("a controller"), learningGaps(unmapped, null))
+        assertEquals(
+            listOf("a channel", "the board reporting float=1 and pos=ok (now float ?, pos ?)"),
+            learningGaps(complete.copy(channel = null), null),
+        )
+    }
+
+    @Test
+    fun `verdicts read as words`() {
+        assertEquals("ok", verdictLabel("ok"))
+        assertEquals("too much", verdictLabel("too_much"))
+        assertEquals("too little", verdictLabel("too_little"))
+        assertEquals("odd", verdictLabel("odd"))
     }
 }

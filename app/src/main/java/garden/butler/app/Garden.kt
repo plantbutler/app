@@ -9,15 +9,26 @@ const val ENV_PREFIX = "env:"
 data class Garden(
     val pots: List<Pot>,
     val env: List<Pot>,
+    /** Disabled pots stay reachable: a pot is switched off to be edited or
+     * re-enabled, not forgotten. */
+    val disabled: List<Pot>,
     val problems: List<String>,
+    val health: Health,
 )
+
+/** The pot as the last good read has it; null once it vanished, in which
+ * case the open form keeps rendering from its own snapshot. */
+fun Garden.potNamed(name: String): Pot? =
+    (pots + disabled + env).firstOrNull { it.name == name }
 
 fun splitGarden(all: List<Pot>, health: Health, nowS: Long): Garden {
     val enabled = all.filter { it.enabled == 1 }
     return Garden(
         pots = enabled.filterNot { it.name.startsWith(ENV_PREFIX) },
         env = enabled.filter { it.name.startsWith(ENV_PREFIX) },
+        disabled = all.filter { it.enabled != 1 },
         problems = problems(health, nowS),
+        health = health,
     )
 }
 
@@ -31,7 +42,7 @@ fun problems(health: Health, nowS: Long): List<String> {
     val raised = health.alerts.map { it.key }.toSet()
     health.alerts.mapTo(found) { describeAlert(it.key, nowS, it.raisedTs) }
     for (c in health.controllers) {
-        val threshold = maxOf(600L, 3L * (c.nextS ?: 60))
+        val threshold = maxOf(600L, 3L * (c.nextS ?: health.nextDefault))
         if (c.lastSeen == 0L) {
             found += "${c.controller} has never reported"
         } else if (
@@ -104,3 +115,96 @@ fun envEntry(pot: Pot): Pair<String, String> {
         }
     return pot.name.removePrefix(ENV_PREFIX) to value
 }
+
+/** One line per controller on the health list: "b1 · seen 40s ago · every
+ * 60s · float ok · pos ok", plus the command in flight when there is one. */
+fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
+    val seen = if (c.lastSeen == 0L) "never reported" else "seen ${agoText(c.lastSeen, nowS)}"
+    val every = c.nextS?.let { "every ${it}s (override)" } ?: "every ${defaultNextS}s"
+    val float =
+        when (c.float) {
+            null -> "float ?"
+            0 -> "float EMPTY"
+            else -> "float ok"
+        }
+    val pos = c.pos?.let { "pos $it" } ?: "pos ?"
+    val parts = mutableListOf(c.controller, seen, every, float, pos)
+    c.command?.let { cmd ->
+        val kind = if (cmd.kind == "water") "" else " ${cmd.kind}"
+        parts += "cmd ${cmd.id}$kind ${cmd.state}"
+    }
+    return parts.joinToString(" · ")
+}
+
+fun hasOverride(c: ControllerHealth): Boolean = c.nextS != null
+
+/** "proposal: 100 ml, cap 10 s, made 3min ago" — what learning mode wants to
+ * pour and is waiting for a tap on. */
+fun proposalLine(p: Proposal, nowS: Long): String {
+    val parts = mutableListOf("proposal: ${p.ml?.toString() ?: "?"} ml")
+    p.capS?.let { parts += "cap $it s" }
+    p.createdTs?.let { parts += "made ${agoText(it, nowS)}" }
+    return parts.joinToString(", ")
+}
+
+/** "<source> dose 100 ml · 40min ago · acked, meter 96 ml". The verdict is
+ * not here: the chips beside it show it. */
+fun doseLine(d: LastDose, nowS: Long): String {
+    val ml = d.ml?.toString() ?: "?"
+    val parts = mutableListOf(listOfNotNull(d.source, "dose $ml ml").joinToString(" "))
+    (d.ackedTs ?: d.sentTs)?.let { parts += agoText(it, nowS) }
+    parts +=
+        when (d.state) {
+            "sent" -> "sent, not acked yet"
+            "expired" -> "expired, never acked"
+            else -> d.state + (d.flowMl?.let { ", meter $it ml" } ?: "")
+        }
+    return parts.joinToString(" · ")
+}
+
+/** A dose is judged after the water has soaked in and before the memory of
+ * the plant has faded. */
+const val SOAK_S = 1800L
+const val VERDICT_WINDOW_S = 48L * 3600
+
+fun needsVerdict(d: LastDose?, nowS: Long): Boolean {
+    if (d == null || d.state != "acked" || d.verdict != null) return false
+    val age = nowS - (d.ackedTs ?: d.sentTs ?: return false)
+    return age > SOAK_S && age <= VERDICT_WINDOW_S
+}
+
+/** The nudge under a pot's row while its last dose waits for a verdict. */
+fun rowNote(pot: Pot, nowS: Long): String? {
+    if (pot.enabled != 1) return null
+    val dose = pot.lastDose?.takeIf { needsVerdict(it, nowS) } ?: return null
+    val ts = dose.ackedTs ?: dose.sentTs ?: return null
+    return "dose ${agoText(ts, nowS)}, not judged yet"
+}
+
+/** What the backend's rules need before learning or auto can do anything,
+ * so the mode flip explains itself instead of silently doing nothing. The
+ * rules also gate on the board's float and pos, which the firmware does
+ * not send yet: that gap names itself rather than being read as "fine". */
+fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
+    val gaps = mutableListOf<String>()
+    if (pot.controller == null) gaps += "a controller"
+    if (pot.channel == null) gaps += "a channel"
+    if (pot.outlet == null) gaps += "an outlet"
+    if (pot.dryRaw == null || pot.wetRaw == null) gaps += "calibration (dry and wet)"
+    if (pot.targetLowPct == null) gaps += "a target low %"
+    if (pot.doseMl == null) gaps += "a dose"
+    if (pot.controller != null && (controller?.float != 1 || controller.pos != "ok")) {
+        gaps +=
+            "the board reporting float=1 and pos=ok (now float ${controller?.float ?: "?"}, " +
+                "pos ${controller?.pos ?: "?"})"
+    }
+    return gaps
+}
+
+fun verdictLabel(v: String): String =
+    when (v) {
+        "ok" -> "ok"
+        "too_much" -> "too much"
+        "too_little" -> "too little"
+        else -> v
+    }
