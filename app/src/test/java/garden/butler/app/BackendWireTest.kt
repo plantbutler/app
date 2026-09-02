@@ -141,4 +141,51 @@ class BackendWireTest {
                 assertEquals(body, sent.body.readUtf8())
             }
         }
+
+    @Test
+    fun `history asks for one sensor's window and parses the buckets`() =
+        withServer { server, backend ->
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"controller": "b1", "channel": 0, "since": 1788205474, "to": 1788291874,
+                       "bucket_s": 300, "points": [{"ts": 1788205500, "raw": 8123, "n": 5}]}""",
+                ),
+            )
+            val history = backend.history("b1", 0, 24, 300)
+            val sent = server.takeRequest()
+            assertEquals("GET", sent.method)
+            assertEquals("/history?c=b1&ch=0&hours=24&bucket_s=300", sent.path)
+            assertEquals(1788291874, history.to)
+            assertEquals(listOf(HistoryPoint(1788205500, 8123, n = 5)), history.points)
+        }
+
+    @Test
+    fun `history percent-encodes the controller's name`() =
+        withServer { server, backend ->
+            server.enqueue(MockResponse().setBody("""{"controller": "b+1", "points": []}"""))
+            backend.history("b+1", 0, 24, 300)
+            assertEquals("/history?c=b%2B1&ch=0&hours=24&bucket_s=300", server.takeRequest().path)
+        }
+
+    @Test
+    fun `water posts the controller, outlet and dose with the token and answers the id`() =
+        withServer { server, backend ->
+            server.enqueue(MockResponse().setBody("cmd=17\n"))
+            assertEquals(17, backend.water("b1", 3, 100))
+
+            val sent = server.takeRequest()
+            assertEquals("POST", sent.method)
+            assertEquals("/command", sent.path)
+            assertEquals("s3cret", sent.getHeader("X-Token"))
+            assertEquals("c=b1 water=3 ml=100", sent.body.readUtf8())
+        }
+
+    @Test
+    fun `a taken slot refuses water with the backend's busy line`() =
+        withServer { server, backend ->
+            server.enqueue(MockResponse().setResponseCode(409).setBody("busy: cmd=3 state=sent\n"))
+            val busy = assertFailsWith<Refused> { backend.water("b1", 3, 100) }
+            assertEquals(409, busy.code)
+            assertEquals("busy: cmd=3 state=sent", busy.text)
+        }
 }
