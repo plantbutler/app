@@ -1,5 +1,6 @@
 package garden.butler.app
 
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -105,7 +106,37 @@ data class Health(
     val alerts: List<RaisedAlert> = emptyList(),
 )
 
+/** One bucket of GET /history: the mean raw count over `bucket_s` seconds
+ * from `ts`, its extremes, and how many readings went in. Raw only: the
+ * app derives % from the pot's current calibration, so a recalibration
+ * re-reads the whole curve. */
+@Serializable
+data class HistoryPoint(
+    val ts: Long,
+    val raw: Long,
+    val lo: Long? = null,
+    val hi: Long? = null,
+    val n: Int = 1,
+)
+
+@Serializable
+data class History(
+    val controller: String = "",
+    val channel: Int = 0,
+    val since: Long = 0,
+    /** The server's clock when it answered: the chart's right edge. */
+    val to: Long = 0,
+    @SerialName("bucket_s") val bucketS: Int = 300,
+    val points: List<HistoryPoint> = emptyList(),
+)
+
 private val json = Json { ignoreUnknownKeys = true }
+
+fun parseHistory(body: String): History = json.decodeFromString(body)
+
+/** `cmd=17` as POST /command answers it; null when it is not that. */
+fun parseCmdAnswer(answer: String): Long? =
+    answer.trim().removePrefix("cmd=").takeIf { it != answer.trim() }?.toLongOrNull()
 
 fun parsePots(body: String): List<Pot> = json.decodeFromString<PotsAnswer>(body).pots
 
@@ -169,6 +200,19 @@ class Backend(private val baseUrl: String, private val token: String = "") {
 
     fun verdict(cmdId: Long, verdict: String): String =
         post("/verdict", "cmd=$cmdId verdict=$verdict")
+
+    /** Bucketed raw counts for one sensor over the last `hours`. The name is
+     * a single token on the wire but not necessarily a URL-safe one. */
+    fun history(controller: String, channel: Int, hours: Int, bucketS: Int): History {
+        val c = URLEncoder.encode(controller, "UTF-8")
+        return parseHistory(get("/history?c=$c&ch=$channel&hours=$hours&bucket_s=$bucketS"))
+    }
+
+    /** Queues one dose through the hand-off; the backend sizes the cap
+     * from the dose itself. Answers the command id, or throws Refused —
+     * "busy: cmd=N state=S" while the controller's one slot is taken. */
+    fun water(controller: String, outlet: Int, ml: Int): Long? =
+        parseCmdAnswer(post("/command", "c=$controller water=$outlet ml=$ml"))
 
     /** Sets (or with 0 clears) the controller's report interval; returns the
      * effective interval the backend answered with. */

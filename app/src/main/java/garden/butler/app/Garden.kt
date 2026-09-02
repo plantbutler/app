@@ -42,7 +42,7 @@ fun problems(health: Health, nowS: Long): List<String> {
     val raised = health.alerts.map { it.key }.toSet()
     health.alerts.mapTo(found) { describeAlert(it.key, nowS, it.raisedTs) }
     for (c in health.controllers) {
-        val threshold = maxOf(600L, 3L * (c.nextS ?: health.nextDefault))
+        val threshold = silentAfterS(c.nextS, health.nextDefault)
         if (c.lastSeen == 0L) {
             found += "${c.controller} has never reported"
         } else if (

@@ -125,4 +125,39 @@ class BackendTest {
         assertNull(parseNextAnswer("pot=basil"))
         assertNull(parseNextAnswer(""))
     }
+
+    @Test
+    fun `history parses its window, bucket and points`() {
+        val body =
+            """
+            {"controller": "b1", "channel": 0, "since": 1788205474, "to": 1788291874,
+             "bucket_s": 300, "points": [
+               {"ts": 1788205500, "raw": 8123, "lo": 8100, "hi": 8150, "n": 5},
+               {"ts": 1788205800, "raw": 8130, "lo": null, "hi": null, "n": 1, "new_key": 1}]}
+            """.trimIndent()
+
+        val history = parseHistory(body)
+        assertEquals("b1", history.controller)
+        assertEquals(0, history.channel)
+        assertEquals(1788205474, history.since)
+        assertEquals(1788291874, history.to)
+        assertEquals(300, history.bucketS)
+        assertEquals(HistoryPoint(1788205500, 8123, 8100, 8150, 5), history.points[0])
+        assertEquals(HistoryPoint(1788205800, 8130, null, null, 1), history.points[1])
+    }
+
+    @Test
+    fun `a sensor without readings parses to no points`() {
+        val history =
+            parseHistory("""{"controller": "b1", "channel": 4, "since": 1, "to": 2, "bucket_s": 300, "points": []}""")
+        assertEquals(emptyList(), history.points)
+        assertEquals(4, history.channel)
+    }
+
+    @Test
+    fun `the command answer is cmd= or nothing`() {
+        assertEquals(17, parseCmdAnswer("cmd=17\n"))
+        assertNull(parseCmdAnswer("busy: cmd=3 state=sent"))
+        assertNull(parseCmdAnswer(""))
+    }
 }

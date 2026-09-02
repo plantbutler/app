@@ -2,9 +2,11 @@ package garden.butler.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -39,6 +41,12 @@ sealed interface Screen {
         val saving: Boolean = false,
         val refused: String? = null,
         val note: String? = null,
+        /** The last 24 h of the stored sensor; stays up when a reload fails. */
+        val history: History? = null,
+        val historyWhy: String? = null,
+        /** The water command this form queued, followed until its fate is known. */
+        val watering: Issued? = null,
+        val waterRefused: String? = null,
     ) : Screen
 
     data class Calibrate(val parent: Pot, val cal: CalState) : Screen
@@ -48,14 +56,23 @@ const val CALIBRATION_SAVED_NOTE =
     "calibration saved — keep the pot in manual for about five readings: " +
         "the rules' window still holds the air values"
 
+private const val NO_ANSWER =
+    "no answer from the butler — it may still have queued the dose; check the controllers card"
+private const val NO_COMMAND_ID = "the butler answered without a command id — check the controllers card"
+
 /** One screen, one state flow, no ceremony (the pitch's own words). */
 class GardenViewModel(
     private val backend: Backend = Backend(BuildConfig.BUTLER_URL, BuildConfig.BUTLER_TOKEN),
+    /** How often the pot screen asks after a queued dose; a test shortens it. */
+    val followEveryMs: Long = FOLLOW_EVERY_MS,
+    /** The phone's clock in seconds; a test drives it past a wait. */
+    private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
 ) : ViewModel() {
     private val current = MutableStateFlow<UiState>(UiState.Loading)
     val state: StateFlow<UiState> = current
     private var fetching: Job? = null
     private var refreshAgain = false
+    private var historyFlight: Job? = null
 
     private val shown = MutableStateFlow<Screen>(Screen.List)
     val screen: StateFlow<Screen> = shown
@@ -86,15 +103,11 @@ class GardenViewModel(
         fetching =
             viewModelScope
                 .launch {
-                    current.value =
+                    val fresh =
                         try {
                             val garden =
                                 withContext(Dispatchers.IO) {
-                                    splitGarden(
-                                        backend.pots(),
-                                        backend.health(),
-                                        System.currentTimeMillis() / 1000,
-                                    )
+                                    splitGarden(backend.pots(), backend.health(), phoneS())
                                 }
                             UiState.Ready(garden)
                         } catch (why: CancellationException) {
@@ -111,6 +124,8 @@ class GardenViewModel(
                                 else -> UiState.Trouble(why.message ?: why.toString())
                             }
                         }
+                    current.value = fresh
+                    if (fresh is UiState.Ready) rideRefresh(fresh.garden)
                 }
                 .also { job ->
                     job.invokeOnCompletion {
@@ -122,20 +137,128 @@ class GardenViewModel(
                 }
     }
 
+    /** The open form rides every successful refresh: its curve reloads so a
+     * dose shows up on it, and a water refusal goes once the slot is free
+     * and nothing is proposed — the reasons the backend gives are the
+     * transient ones. */
+    private fun rideRefresh(garden: Garden) {
+        val form = shown.value as? Screen.Pot ?: return
+        val pot = form.name?.let { garden.potNamed(it) } ?: return
+        loadHistory(form, pot)
+        if (form.waterRefused != null &&
+            cannotWater(pot, controllerOf(pot.controller), nowS(), nextDefault(), emptySet()) == null
+        ) {
+            onPot(form) { it.copy(waterRefused = null) }
+        }
+    }
+
     private val garden: Garden?
         get() = (current.value as? UiState.Ready)?.garden
 
     fun currentPot(name: String): Pot? = garden?.potNamed(name)
 
+    /** The phone's own clock: what a command was issued against, so a
+     * backend with a clock of its own cannot stretch or cut the wait. */
+    fun phoneS(): Long = clock()
+
     /** A phone clock behind the backend's would call every fresh reading
      * stale, so "now" is never earlier than the backend's newest report. */
-    fun nowS(): Long =
-        maxOf(System.currentTimeMillis() / 1000, garden?.health?.lastTs ?: 0, polledTs)
+    fun nowS(): Long = maxOf(phoneS(), garden?.health?.lastTs ?: 0, polledTs)
 
     fun open(name: String) {
-        val draft = draftOf(currentPot(name) ?: return)
+        val pot = currentPot(name) ?: return
+        val draft = draftOf(pot)
         noteOnList.value = null
-        shown.value = Screen.Pot(name, draft, draft)
+        val form = Screen.Pot(name, draft, draft)
+        shown.value = form
+        loadHistory(form, pot)
+    }
+
+    /** The curve is raw counts read through the pot's current calibration,
+     * so a recalibration needs no reload; a failed fetch keeps the curve
+     * already up and says why beside it. Single-flight: a reload cancels
+     * the one before it, and a cancelled flight lands nothing — not even
+     * its failure over a newer curve. */
+    private fun loadHistory(form: Screen.Pot, pot: Pot) {
+        val controller = pot.controller ?: return
+        val channel = pot.channel ?: return
+        historyFlight?.cancel()
+        historyFlight =
+            viewModelScope.launch {
+                try {
+                    val history =
+                        withContext(Dispatchers.IO) {
+                            backend.history(controller, channel, HISTORY_HOURS, HISTORY_BUCKET_S)
+                        }
+                    onPot(form) { it.copy(history = history, historyWhy = null) }
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    ensureActive()
+                    onPot(form) { it.copy(historyWhy = "chart: " + (why.message ?: why.toString())) }
+                }
+            }
+    }
+
+    private fun controllerOf(name: String?): ControllerHealth? =
+        garden?.health?.controllers?.firstOrNull { it.controller == name }
+
+    private fun nextDefault(): Int = garden?.health?.nextDefault ?: 60
+
+    /** One dose to the stored pot — never the draft: the backend waters what
+     * it has, so an unsaved controller or dose would water the wrong thing.
+     * The checks are cannotWater's; the backend repeats the ones it owns. */
+    fun water() {
+        val form = shown.value as? Screen.Pot ?: return
+        val name = form.name ?: return
+        val pot = currentPot(name) ?: return
+        val dirty =
+            changedFields(form.original, form.draft).keys +
+                emptiedFields(form.original, form.draft).map { it.key }
+        cannotWater(pot, controllerOf(pot.controller), nowS(), nextDefault(), dirty)?.let { reason ->
+            return onPot(form) { it.copy(waterRefused = reason) }
+        }
+        val controller = pot.controller ?: return
+        val outlet = pot.outlet ?: return
+        val ml = pot.doseMl ?: return
+        onPot(form) { it.copy(saving = true, waterRefused = null) }
+        viewModelScope.launch {
+            // A POST that timed out client-side may still have queued the
+            // dose: the refresh after it shows the slot either way.
+            try {
+                val id = withContext(Dispatchers.IO) { backend.water(controller, outlet, ml) }
+                onPot(form) {
+                    if (id == null) {
+                        it.copy(saving = false, waterRefused = NO_COMMAND_ID)
+                    } else {
+                        it.copy(saving = false, watering = Issued(id, phoneS()), waterRefused = null)
+                    }
+                }
+            } catch (why: CancellationException) {
+                throw why
+            } catch (why: IOException) {
+                onPot(form) { it.copy(saving = false, waterRefused = NO_ANSWER) }
+            } catch (why: Exception) {
+                onPot(form) { it.copy(saving = false, waterRefused = why.message ?: why.toString()) }
+            }
+            refresh()
+        }
+    }
+
+    /** One more look at the slot and the log; the pot screen calls it every
+     * followEveryMs while stillFollowing, so nothing here loops. The curve
+     * rides the refresh, so the dose shows up on it. */
+    fun followWater() = refresh()
+
+    /** Where the form's queued dose is, read from the last good garden. A
+     * failed refresh leaves the previous garden up and must not read as
+     * "the command is gone". The wait is measured on the clock that
+     * stamped the command. */
+    fun currentWaterStatus(form: Screen.Pot): WaterStatus? {
+        val issued = form.watering ?: return null
+        val pot = form.name?.let { currentPot(it) }
+        val stale = (current.value as? UiState.Ready)?.why != null
+        return waterStatus(issued, pot, controllerOf(pot?.controller), phoneS(), stale)
     }
 
     fun newPot() {
@@ -143,7 +266,8 @@ class GardenViewModel(
         shown.value = Screen.Pot(null, emptyMap(), emptyMap())
     }
 
-    fun edit(key: String, value: String) = onPot { it.copy(draft = it.draft + (key to value), refused = null) }
+    fun edit(key: String, value: String) =
+        onPot { it.copy(draft = it.draft + (key to value), refused = null, waterRefused = null) }
 
     fun back() {
         when (shown.value) {
@@ -235,7 +359,7 @@ class GardenViewModel(
             } catch (why: Exception) {
                 return "could not reach the butler: ${why.message ?: why}"
             }
-        current.value = UiState.Ready(splitGarden(pots, health, System.currentTimeMillis() / 1000))
+        current.value = UiState.Ready(splitGarden(pots, health, phoneS()))
         val pot = pots.firstOrNull { it.name == name } ?: return "$name is no longer on the backend"
         val on = health.controllers.firstOrNull { it.controller == pot.controller }
         canCalibrate(pot, on, nowS(), health.nextDefault)?.let { return it }

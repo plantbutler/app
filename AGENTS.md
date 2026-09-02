@@ -1,6 +1,6 @@
 # Working on the app
 
-Two pitches in (2026-09-02): "Hello, pots" and "Manage the garden". Read the umbrella's
+Three pitches in (2026-09-02): "Hello, pots", "Manage the garden" and "Water now and a chart" — the v1 app. Read the umbrella's
 [AGENTS.md](https://github.com/plantbutler/plantbutler/blob/main/AGENTS.md) (on this machine: `~/projects/plant-butler/AGENTS.md`) and
 [DECISIONS.md](https://github.com/plantbutler/plantbutler/blob/main/DECISIONS.md) first.
 
@@ -16,11 +16,9 @@ state flows, pure functions for every decision, JVM tests only.
 
 1. **Hello, pots** — done (app#1). The list: pots with % and last-seen, `env:*` pots as an
    environment card, the problem strip, 60 s auto-refresh, Ready surviving a failed refresh.
-2. **Water now and a chart** — one detail screen: the pot's moisture history and a water-now
-   button that queues a command through the backend's hand-off, status "queued/done", honestly
-   labelled "up to about three minutes". The pot screen and the `Screen` flow already exist
-   (pitch 3 built them); this pitch slots a chart and a button above the form. Pick a chart
-   library or draw a Canvas polyline on the first evening and live with it.
+2. **Water now and a chart** — done (app#3, built after 3). The pot's last day as a Canvas
+   polyline above the form, and a water-now button through the backend's hand-off with a
+   status line worded to it. See "What is here".
 3. **Manage the garden** — done (app#2). Names, thresholds, channel/valve/plant mapping,
    recalibration capture, controller health, approve/verdict. See "What is here".
 
@@ -58,22 +56,47 @@ Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, themi
   never takes a standing 5 s as the pace to restore, and restores `prevNextS ?: 0` on every
   exit — the controllers card's reset chip is the recovery path when that fails or the
   process died.
+- `Chart.kt` — the moisture chart as data: `chartSeries` (segments; the pen lifts across a
+  gap longer than max(2 buckets, the silence threshold)), `moisturePct` (the backend's
+  formula operation for operation, `Math.rint` for Python's banker's rounding, so the curve
+  agrees with the title line), `chartRange`, `yTicks`/`timeTicks` (wall-clock hours in the
+  phone's zone), `chartCaption` (window, bucket, count, and whose calibration reads it — the
+  one accessible copy of what the canvas shows). Raw comes over the wire (`GET /history`,
+  epoch-aligned buckets, the server's `since`/`to` as the axis); % is derived here from the
+  pot's current calibration, so a recalibration re-reads the whole curve. Calibrated pots
+  plot 0–100 % with a translucent band between the targets; uncalibrated ones plot raw.
+- `Water.kt` — the water-now button as pure decisions: `cannotWater` (disabled pot, no
+  mapping, no dose, an unsaved controller/outlet/dose edit, a silent board, a busy slot, a
+  proposal waiting — in that order), `waterStatus` from `/pots` `last_dose` and `/health`'s
+  slot for the one id this form issued (acked → done with the meter, expired → "maybe
+  nothing poured, maybe the ack was lost", past four minutes → "no news — check the
+  controllers card"), `stillFollowing` (a 15 s refresh only while the fate is open, only
+  while RESUMED, measured on the phone clock), `waterDialogText` (the one confirmation:
+  counts as today's watering for the rules; NAS or board down means no water).
 - `Main.kt` — `App()`: one `when` over `Screen`, the 60 s refresh loop (paused while the
   wizard polls every 2 s), the BackHandler for the wizard. `GardenScreen.kt`, `PotScreen.kt`
-  (form, proposal card, dose card with verdict chips, discard dialog), `CalibrateScreen.kt`
-  (one card per state; leaving the foreground cancels the wizard so the restore runs).
+  (hero line, the chart, the water row, proposal card, dose card with verdict chips, discard
+  dialog; every refresh reloads the open pot's curve too), `CalibrateScreen.kt` (one card per
+  state; leaving the foreground cancels the wizard so the restore runs).
 
-`app/src/test/java/garden/butler/app/` — 93 JVM tests: reducers and lines (`CalibrationTest`,
-`PotFormTest`, `GardenTest`), wire parsing (`BackendTest`), the HTTP layer against
-`MockWebServer` (`BackendWireTest`), and the ViewModel driver against `MockWebServer` with
-`Dispatchers.setMain` (`GardenViewModelTest`). No emulator anywhere.
+`app/src/test/java/garden/butler/app/` — JVM tests only: reducers and lines
+(`CalibrationTest`, `ChartTest`, `WaterTest`, `PotFormTest`, `GardenTest`), wire parsing
+(`BackendTest`), the HTTP layer against `MockWebServer` (`BackendWireTest`), and the
+ViewModel driver against `MockWebServer` with `Dispatchers.setMain` and a settable clock
+(`GardenViewModelTest`). The Canvas itself is the one thing without a test: everything it
+draws comes from a pure function that has one. No emulator anywhere.
 
 Known limits, on purpose: no rename (name is the key; disable and create instead), no
 clearing a field (`enabled=0` and `mode=manual` cover the real cases), single-sample capture
 in the wizard (revisit with the real probe — a median of the last three is a five-line change
 in `calStep`), the backend keeps an interval override forever (a process death between
 arming and restoring leaves the board at 5 s until the reset chip is tapped). Calibration
-readings land in the pot's history like any other.
+readings land in the pot's history like any other, so the wizard shows as a spike on the
+chart. A manual dose bypasses cooldown, daily cap, quiet hours and the float/pos gates
+(decision #5: the firmware protects) and then counts toward the rules' cooldown and cap;
+it lands in the dose card and asks for a verdict like any other. The real board does not
+execute commands until "Pump on command": the water row is verified against the fake board.
+No watering history and no touch on the chart, per the pitch.
 
 ## Toolchain (picked 2026-09-01, CLI-only)
 
