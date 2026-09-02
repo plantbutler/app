@@ -57,4 +57,72 @@ class BackendTest {
     fun `an empty garden parses to an empty list`() {
         assertEquals(emptyList(), parsePots("""{"pots": []}"""))
     }
+
+    @Test
+    fun `a pot with every column, a full proposal and a judged dose parses`() {
+        val body =
+            """
+            {"pots": [{"id": 1, "name": "basil", "controller": "b1", "channel": 0,
+              "outlet": 3, "plant_type": "basil", "plant_size": "small",
+              "pot_size": "12cm", "soil": "loam", "dry_raw": 12000, "wet_raw": 4000,
+              "target_low_pct": 30, "target_high_pct": 60, "dose_ml": 100,
+              "mode": "learning", "cooldown_h": 12, "daily_cap_ml": 300,
+              "enabled": 1, "raw": 8123, "pct": 48, "read_ts": 1788291874,
+              "proposal": {"id": 17, "ml": 100, "cap_s": 10, "created_ts": 1788291000},
+              "last_dose": {"id": 16, "ml": 100, "cap_s": 10, "flow_ml": 96,
+                "state": "acked", "source": "manual", "sent_ts": 1788200000,
+                "acked_ts": 1788200100, "verdict": "too_much"}}]}
+            """.trimIndent()
+
+        val pot = parsePots(body).single()
+        assertEquals("small", pot.plantSize)
+        assertEquals("12cm", pot.potSize)
+        assertEquals("loam", pot.soil)
+        assertEquals(60, pot.targetHighPct)
+        assertEquals(100, pot.doseMl)
+        assertEquals(12, pot.cooldownH)
+        assertEquals(300, pot.dailyCapMl)
+        assertEquals("learning", pot.mode)
+        assertEquals(Proposal(17, 100, 10, 1788291000), pot.proposal)
+        assertEquals(
+            LastDose(16, 100, 10, 96, "acked", "manual", 1788200000, 1788200100, "too_much"),
+            pot.lastDose,
+        )
+    }
+
+    @Test
+    fun `last_dose null and absent both mean no dose`() {
+        val pots =
+            parsePots(
+                """{"pots": [{"name": "a", "last_dose": null}, {"name": "b"}]}""",
+            )
+        assertNull(pots[0].lastDose)
+        assertNull(pots[1].lastDose)
+    }
+
+    @Test
+    fun `health parses the command in flight and the default interval`() {
+        val body =
+            """
+            {"ok": true, "next_default": 30,
+             "controllers": [{"controller": "b1", "last_seen": 5,
+               "command": {"id": 17, "kind": "stop", "state": "queued"}}]}
+            """.trimIndent()
+
+        val health = parseHealth(body)
+        assertEquals(30, health.nextDefault)
+        assertEquals(InFlight(17, "stop", "queued"), health.controllers[0].command)
+    }
+
+    @Test
+    fun `an older backend without next_default means 60`() {
+        assertEquals(60, parseHealth("""{"ok": true}""").nextDefault)
+    }
+
+    @Test
+    fun `the interval answer is next= or nothing`() {
+        assertEquals(120, parseNextAnswer("next=120\n"))
+        assertNull(parseNextAnswer("pot=basil"))
+        assertNull(parseNextAnswer(""))
+    }
 }
