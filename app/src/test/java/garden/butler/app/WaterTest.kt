@@ -159,11 +159,18 @@ class WaterTest {
             "queued — b1 collects it on its next report, up to about three minutes",
             waterLine(WaterStatus.Queued, "b1"),
         )
-        assertEquals("handed to b1 — it waters, then acks on its next report", waterLine(WaterStatus.Sent, "b1"))
-        assertEquals("done — b1 poured 96 ml (meter)", waterLine(WaterStatus.Done(96), "b1"))
-        assertEquals("done — acked by b1", waterLine(WaterStatus.Done(null), "b1"))
         assertEquals(
-            "expired — b1 never acked it: maybe nothing poured, maybe it poured and the ack was lost",
+            "handed to b1 — it waters, then confirms on its next report",
+            waterLine(WaterStatus.Sent, "b1"),
+        )
+        // The wire says "ack"; a person should never have to.
+        for (status in listOf(WaterStatus.Queued, WaterStatus.Sent, WaterStatus.Done(null), WaterStatus.Expired)) {
+            assertFalse("ack" in waterLine(status, "b1"))
+        }
+        assertEquals("done — b1 poured 96 ml (meter)", waterLine(WaterStatus.Done(96), "b1"))
+        assertEquals("done — confirmed by b1", waterLine(WaterStatus.Done(null), "b1"))
+        assertEquals(
+            "expired — b1 never confirmed it: maybe nothing poured, maybe it poured and the confirmation was lost",
             waterLine(WaterStatus.Expired, "b1"),
         )
         assertEquals("no news after 4 min — check the controllers card", waterLine(WaterStatus.NoNews, "b1"))
@@ -184,9 +191,11 @@ class WaterTest {
     @Test
     fun `the confirmation names the pot, the dose and where it goes`() {
         assertEquals(
-            "Water basil with 100 ml on b1 outlet 3? Counts as today's watering for the rules. " +
-                "NAS or board down means no water.",
+            "Water basil with 100 ml on b1 outlet 3? Counts as today's watering.",
             waterDialogText(ready),
         )
+        // No warning about a failure that has not happened: the dose's own
+        // status line says so if and when it does.
+        assertFalse("NAS" in waterDialogText(ready))
     }
 }

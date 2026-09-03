@@ -25,16 +25,17 @@ fun flowedShort(dose: Dose): Boolean {
 fun doseTrouble(dose: Dose): String? =
     when {
         dose.state == "expired" ->
-            "expired — the board never acknowledged it, so nobody knows whether it poured"
+            "expired — the board never confirmed it, so nobody knows whether it poured"
         dose.state == "failed" -> "the board reported it failed"
         dose.state == "acked" && flowedShort(dose) ->
             "the meter counted ${dose.flowMl} of ${dose.ml} ml"
         else -> null
     }
 
-/** "100 ml · 3h ago · acked, meter 96 ml" — the row's own line. Worded
+/** "100 ml · 3h ago · confirmed, meter 96 ml" — the row's own line. Worded
  * like the pot screen's dose card, so the same dose reads the same in both
- * places. */
+ * places, and in words rather than the wire's: "ack" is what the board
+ * sends, not something a person should have to know. */
 fun doseHistoryLine(dose: Dose, nowS: Long): String {
     val parts = mutableListOf<String>()
     parts += if (dose.kind != "water") dose.kind else dose.ml?.let { "$it ml" } ?: "? ml"
@@ -42,8 +43,9 @@ fun doseHistoryLine(dose: Dose, nowS: Long): String {
     parts +=
         when (dose.state) {
             "queued" -> "queued, never handed out"
-            "sent" -> "handed to the board, not acked yet"
-            "expired" -> "expired, never acked"
+            "sent" -> "handed to the board, waiting for it to confirm"
+            "expired" -> "expired, the board never confirmed it"
+            "acked" -> "confirmed" + (dose.flowMl?.let { ", meter $it ml" } ?: "")
             else -> dose.state + (dose.flowMl?.let { ", meter $it ml" } ?: "")
         }
     return parts.joinToString(" · ")

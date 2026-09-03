@@ -38,7 +38,7 @@ class DosesTest {
     @Test
     fun `the rows worth reading say why, and an ordinary dose says nothing`() {
         assertEquals(
-            "expired — the board never acknowledged it, so nobody knows whether it poured",
+            "expired — the board never confirmed it, so nobody knows whether it poured",
             doseTrouble(dose(state = "expired", ackedTs = null)),
         )
         assertEquals("the board reported it failed", doseTrouble(dose(state = "failed")))
@@ -52,15 +52,15 @@ class DosesTest {
     @Test
     fun `the line says the dose, when, and how it ended`() {
         assertEquals(
-            "100 ml · 2h ago · acked, meter 96 ml",
+            "100 ml · 2h ago · confirmed, meter 96 ml",
             doseHistoryLine(dose(flowMl = 96, ackedTs = 1000), 1000 + 2 * 3600),
         )
         assertEquals(
-            "100 ml · 2h ago · expired, never acked",
+            "100 ml · 2h ago · expired, the board never confirmed it",
             doseHistoryLine(dose(state = "expired", ackedTs = null, sentTs = 1000), 1000 + 2 * 3600),
         )
         assertEquals(
-            "100 ml · 2h ago · handed to the board, not acked yet",
+            "100 ml · 2h ago · handed to the board, waiting for it to confirm",
             doseHistoryLine(dose(state = "sent", ackedTs = null, sentTs = 1000), 1000 + 2 * 3600),
         )
         // Never handed out: the only time it has is when it was made.
@@ -71,11 +71,11 @@ class DosesTest {
                 1000 + 2 * 3600,
             ),
         )
-        assertEquals("? ml · 2h ago · acked", doseHistoryLine(dose(ml = null, ackedTs = 1000), 1000 + 2 * 3600))
+        assertEquals("? ml · 2h ago · confirmed", doseHistoryLine(dose(ml = null, ackedTs = 1000), 1000 + 2 * 3600))
         // The backend filters stops out of /doses, so this is defence for a
         // field the wire still carries rather than a row the app will meet:
         // if one ever arrives it names itself instead of posing as 0 ml.
-        assertEquals("stop · 2h ago · acked", doseHistoryLine(dose(kind = "stop", ackedTs = 1000), 1000 + 2 * 3600))
+        assertEquals("stop · 2h ago · confirmed", doseHistoryLine(dose(kind = "stop", ackedTs = 1000), 1000 + 2 * 3600))
     }
 
     @Test

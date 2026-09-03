@@ -70,7 +70,9 @@ Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, themi
   epoch-aligned buckets, the server's `since`/`to` as the axis); % is derived here from the
   pot's current calibration, so a recalibration re-reads the whole curve. Calibrated pots
   plot 0–100 % with a translucent band between the targets; uncalibrated ones plot raw.
-- `Doses.kt` — the watering history as words: `doseHistoryLine`, `doseTrouble` (the row worth a
+- `Doses.kt` — the watering history as words (in a person's words, not the wire's: the board
+  sends `ack=`, the screen says "confirmed" — nobody should have to know the protocol to read
+  their own garden): `doseHistoryLine`, `doseTrouble` (the row worth a
   second look — expired, failed, or the meter counting less than half, which is the backend's own
   `2 * flow_ml < ml` rather than a second threshold that could disagree with it in public),
   `doseWho` (an unattributable dose says so rather than borrowing the name of whoever hangs on
@@ -82,7 +84,8 @@ Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, themi
   nothing poured, maybe the ack was lost", past four minutes → "no news — check the
   controllers card"), `stillFollowing` (a 15 s refresh only while the fate is open, only
   while RESUMED, measured on the phone clock), `waterDialogText` (the one confirmation:
-  counts as today's watering for the rules; NAS or board down means no water).
+  counts as today's watering — a consequence of the tap, not a warning about failures that have
+  not happened; the status line under the button says so if one does).
 - `DosesScreen.kt` — the watering history, one pot's or the garden's, over the form it was
   opened from so Back gives a half-typed edit back. The rows that went wrong carry their own
   line in the error colour instead of being filtered out, and the list says it is the last N

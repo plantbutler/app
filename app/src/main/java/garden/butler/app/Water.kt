@@ -88,12 +88,13 @@ fun waterLine(status: WaterStatus, controller: String): String =
     when (status) {
         WaterStatus.Queued ->
             "queued — $controller collects it on its next report, up to about three minutes"
-        WaterStatus.Sent -> "handed to $controller — it waters, then acks on its next report"
+        WaterStatus.Sent -> "handed to $controller — it waters, then confirms on its next report"
         is WaterStatus.Done ->
             status.flowMl?.let { "done — $controller poured $it ml (meter)" }
-                ?: "done — acked by $controller"
+                ?: "done — confirmed by $controller"
         WaterStatus.Expired ->
-            "expired — $controller never acked it: maybe nothing poured, maybe it poured and the ack was lost"
+            "expired — $controller never confirmed it: maybe nothing poured, " +
+                "maybe it poured and the confirmation was lost"
         WaterStatus.NoNews -> "no news after 4 min — check the controllers card"
     }
 
@@ -104,9 +105,10 @@ fun stillFollowing(issued: Issued?, status: WaterStatus?, nowS: Long): Boolean {
     return open && nowS - issued.ts <= FOLLOW_MAX_S
 }
 
-/** The one confirmation the pitch allows, saying what the rules will make
- * of it and what can silently make it nothing. */
+/** The one confirmation the pitch allows: what is about to happen and what
+ * the rules will make of it. Nothing about what might go wrong — a failure
+ * that has not happened is noise, and the status line under the button says
+ * so if and when it does. */
 fun waterDialogText(pot: Pot): String =
     "Water ${pot.name} with ${pot.doseMl ?: "?"} ml on ${pot.controller ?: "?"} outlet " +
-        "${pot.outlet ?: "?"}? Counts as today's watering for the rules. " +
-        "NAS or board down means no water."
+        "${pot.outlet ?: "?"}? Counts as today's watering."

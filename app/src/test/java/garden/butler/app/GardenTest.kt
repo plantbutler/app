@@ -297,16 +297,16 @@ class GardenTest {
     @Test
     fun `the dose line covers source, ago, state and meter`() {
         assertEquals(
-            "manual dose 100 ml · 40min ago · acked, meter 96 ml",
+            "manual dose 100 ml · 40min ago · confirmed, meter 96 ml",
             doseLine(dose(source = "manual", sentTs = -3000, ackedTs = -1400, flowMl = 96), 1000),
         )
-        assertEquals("dose 100 ml · 10s ago · acked", doseLine(dose(ackedTs = 990), 1000))
+        assertEquals("dose 100 ml · 10s ago · confirmed", doseLine(dose(ackedTs = 990), 1000))
         assertEquals(
-            "dose 100 ml · 10s ago · sent, not acked yet",
+            "dose 100 ml · 10s ago · handed over, waiting for the board to confirm",
             doseLine(dose(state = "sent", sentTs = 990), 1000),
         )
         assertEquals(
-            "dose ? ml · expired, never acked",
+            "dose ? ml · expired, the board never confirmed it",
             doseLine(dose(state = "expired", ml = null), 1000),
         )
         assertFalse("too" in doseLine(dose(ackedTs = 990, verdict = "too_much"), 1000))
