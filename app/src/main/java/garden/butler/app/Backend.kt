@@ -42,7 +42,12 @@ data class LastDose(
 
 @Serializable
 data class Pot(
+    /** The backend's own key, `pot-3f9a21`. Defaults to empty so a backend
+     * older than the app still decodes; nothing may use "" as a key. */
+    val id: String = "",
+    /** A nickname, editable, unique among pots — not the identity. */
     val name: String,
+    val species: String? = null,
     val controller: String? = null,
     val channel: Int? = null,
     val outlet: Int? = null,

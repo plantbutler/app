@@ -111,7 +111,7 @@ private fun GardenList(
             if (garden.env.isNotEmpty()) {
                 item { EnvCard(garden.env, nowS, model::open) }
             }
-            items(garden.pots, key = { it.name }) { pot -> PotRow(pot, nowS, model::open) }
+            items(garden.pots, key = { rowKey(it) }) { pot -> PotRow(pot, nowS, model::open) }
             if (garden.pots.isEmpty() && garden.disabled.isEmpty() && garden.env.isEmpty()) {
                 item {
                     Text(
@@ -129,7 +129,7 @@ private fun GardenList(
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
-                items(garden.disabled, key = { "off:" + it.name }) { pot ->
+                items(garden.disabled, key = { "off:" + rowKey(it) }) { pot ->
                     Box(Modifier.alpha(0.6f)) { PotRow(pot, nowS, model::open) }
                 }
             }
@@ -202,7 +202,7 @@ private fun EnvCard(env: List<Pot>, nowS: Long, open: (String) -> Unit) {
         ) {
             env.forEach { pot ->
                 val (label, value) = envEntry(pot)
-                Column(Modifier.clickable { open(pot.name) }) {
+                Column(Modifier.clickable { open(pot.id) }) {
                     Text(label, style = MaterialTheme.typography.labelSmall)
                     Text(value, style = MaterialTheme.typography.titleMedium)
                     envStale(pot, nowS)?.let {
@@ -218,10 +218,15 @@ private fun EnvCard(env: List<Pot>, nowS: Long, open: (String) -> Unit) {
     }
 }
 
+/** The id, which a rename does not move. A backend too old to send one
+ * would give every row the same empty key, and a LazyColumn throws on a
+ * duplicate: fall back to the name there rather than take the list down. */
+private fun rowKey(pot: Pot): String = pot.id.ifEmpty { "name:" + pot.name }
+
 @Composable
 private fun PotRow(pot: Pot, nowS: Long, open: (String) -> Unit) {
     ListItem(
-        modifier = Modifier.clickable { open(pot.name) },
+        modifier = Modifier.clickable { open(pot.id) },
         headlineContent = { Text(pot.name) },
         supportingContent = {
             Column {
@@ -244,7 +249,7 @@ private fun PotRow(pot: Pot, nowS: Long, open: (String) -> Unit) {
         },
         trailingContent = {
             if (pot.mode != "manual") {
-                AssistChip(onClick = { open(pot.name) }, label = { Text(pot.mode) })
+                AssistChip(onClick = { open(pot.id) }, label = { Text(pot.mode) })
             }
         },
     )

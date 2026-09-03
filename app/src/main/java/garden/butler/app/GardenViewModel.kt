@@ -31,11 +31,12 @@ sealed interface UiState {
 sealed interface Screen {
     data object List : Screen
 
-    /** `name == null` is create mode; the typed name then lives in
-     * `draft["name"]`. `original` is what the backend stores, so the form
-     * is a diff against it. */
+    /** `id == null` is create mode: the backend mints the id on save. The
+     * nickname lives in `draft["name"]` either way, which is what makes a
+     * rename an ordinary edit. `original` is what the backend stores, so
+     * the form is a diff against it. */
     data class Pot(
-        val name: String?,
+        val id: String?,
         val original: Map<String, String>,
         val draft: Map<String, String>,
         val saving: Boolean = false,
@@ -143,7 +144,7 @@ class GardenViewModel(
      * transient ones. */
     private fun rideRefresh(garden: Garden) {
         val form = shown.value as? Screen.Pot ?: return
-        val pot = form.name?.let { garden.potNamed(it) } ?: return
+        val pot = form.id?.let { garden.potById(it) } ?: return
         loadHistory(form, pot)
         if (form.waterRefused != null &&
             cannotWater(pot, controllerOf(pot.controller), nowS(), nextDefault(), emptySet()) == null
@@ -155,7 +156,7 @@ class GardenViewModel(
     private val garden: Garden?
         get() = (current.value as? UiState.Ready)?.garden
 
-    fun currentPot(name: String): Pot? = garden?.potNamed(name)
+    fun currentPot(id: String): Pot? = garden?.potById(id)
 
     /** The phone's own clock: what a command was issued against, so a
      * backend with a clock of its own cannot stretch or cut the wait. */
@@ -165,11 +166,11 @@ class GardenViewModel(
      * stale, so "now" is never earlier than the backend's newest report. */
     fun nowS(): Long = maxOf(phoneS(), garden?.health?.lastTs ?: 0, polledTs)
 
-    fun open(name: String) {
-        val pot = currentPot(name) ?: return
+    fun open(id: String) {
+        val pot = currentPot(id) ?: return
         val draft = draftOf(pot)
         noteOnList.value = null
-        val form = Screen.Pot(name, draft, draft)
+        val form = Screen.Pot(id, draft, draft)
         shown.value = form
         loadHistory(form, pot)
     }
@@ -210,8 +211,8 @@ class GardenViewModel(
      * The checks are cannotWater's; the backend repeats the ones it owns. */
     fun water() {
         val form = shown.value as? Screen.Pot ?: return
-        val name = form.name ?: return
-        val pot = currentPot(name) ?: return
+        val id = form.id ?: return
+        val pot = currentPot(id) ?: return
         val dirty =
             changedFields(form.original, form.draft).keys +
                 emptiedFields(form.original, form.draft).map { it.key }
@@ -256,7 +257,7 @@ class GardenViewModel(
      * stamped the command. */
     fun currentWaterStatus(form: Screen.Pot): WaterStatus? {
         val issued = form.watering ?: return null
-        val pot = form.name?.let { currentPot(it) }
+        val pot = form.id?.let { currentPot(it) }
         val stale = (current.value as? UiState.Ready)?.why != null
         return waterStatus(issued, pot, controllerOf(pot?.controller), phoneS(), stale)
     }
@@ -279,15 +280,22 @@ class GardenViewModel(
 
     fun save() {
         val form = shown.value as? Screen.Pot ?: return
-        val name = form.name ?: form.draft["name"].orEmpty()
+        val name = form.draft["name"].orEmpty()
         if (name.isBlank()) return onPot(form) { it.copy(refused = "give the pot a name") }
-        // POST /pot upserts: a new pot spelt like a stored one would silently
-        // edit that one instead.
-        if (form.name == null && garden?.let { nameTaken(it, name) } == true) {
-            return onPot(form) { it.copy(refused = "${tokenize(name)} already exists — open it from the list") }
+        // Nicknames stay unique: a create spelt like a stored pot, or a
+        // rename onto another pot's name, is caught here as well as by the
+        // backend. The pot's own name is not a clash with itself.
+        if (garden?.let { nameTaken(it, name, form.id) } == true) {
+            val why =
+                if (form.id == null) {
+                    "${tokenize(name)} already exists — open it from the list"
+                } else {
+                    "${tokenize(name)} is another pot's name"
+                }
+            return onPot(form) { it.copy(refused = why) }
         }
         onPot(form) { it.copy(saving = true, refused = null) }
-        val body = potBody(name, changedFields(form.original, form.draft))
+        val body = potBody(form.id, name, changedFields(form.original, form.draft))
         viewModelScope.launch {
             // A save that timed out client-side may still have committed:
             // the refresh after it, either way, shows what the backend has.
@@ -324,10 +332,14 @@ class GardenViewModel(
      * minute old — a pot flipped to auto or a board gone silent since. */
     fun startCalibration() {
         val parent = shown.value as? Screen.Pot ?: return
-        val name = parent.name ?: return
+        val id = parent.id ?: return
+        val name = currentPot(id)?.name ?: parent.original["name"] ?: return
         if (parent.saving) return
+        // A rename is a change like any other here: the wizard posts the
+        // stored name, so an unsaved one would be silently dropped.
         if (changedFields(parent.original, parent.draft).isNotEmpty() ||
-            emptiedFields(parent.original, parent.draft).isNotEmpty()
+            emptiedFields(parent.original, parent.draft).isNotEmpty() ||
+            renamed(parent.original, parent.draft)
         ) {
             return noteOnPot(
                 parent,
@@ -377,7 +389,7 @@ class GardenViewModel(
         val prevNextS = on?.nextS?.takeUnless { it == FAST_NEXT_S }
         val start = calStart(prevNextS, nowS(), health.nextDefault)
         shown.update {
-            if (it is Screen.Pot && it.name == parent.name) Screen.Calibrate(it.copy(saving = false), start) else it
+            if (it is Screen.Pot && it.id == parent.id) Screen.Calibrate(it.copy(saving = false), start) else it
         }
         return null
     }
@@ -385,7 +397,7 @@ class GardenViewModel(
     /** One poll of the wizard: the pot's newest reading, then a tick. A
      * failed fetch is weather, not a verdict — it only ticks. */
     fun calPoll() {
-        val name = (shown.value as? Screen.Calibrate)?.parent?.name ?: return
+        val id = (shown.value as? Screen.Calibrate)?.parent?.id ?: return
         if (polling?.isActive == true) return
         polling =
             viewModelScope.launch {
@@ -400,7 +412,7 @@ class GardenViewModel(
                 if (fetched != null) {
                     val (pots, health) = fetched
                     polledTs = maxOf(polledTs, health.lastTs ?: 0)
-                    val pot = pots.firstOrNull { it.name == name }
+                    val pot = pots.firstOrNull { it.id == id }
                     if (pot?.raw != null && pot.readTs != null) {
                         calEvent(CalEvent.Seen(pot.raw, pot.readTs))
                     }
@@ -424,7 +436,11 @@ class GardenViewModel(
     }
 
     private fun saveCalibration(parent: Screen.Pot, s: CalState.Saving) {
-        val body = potBody(parent.name ?: return, mapOf("dry_raw" to "${s.dry}", "wet_raw" to "${s.wet}"))
+        // The stored name, not the draft's: the wizard refused to arm over
+        // an unsaved rename, so these are the same, and the stored one
+        // cannot carry a half-typed nickname into a calibration save.
+        val name = parent.original["name"] ?: return
+        val body = potBody(parent.id, name, mapOf("dry_raw" to "${s.dry}", "wet_raw" to "${s.wet}"))
         viewModelScope.launch {
             val outcome =
                 try {
@@ -499,6 +515,9 @@ class GardenViewModel(
         shown.update { if (it is Screen.Pot && it.isForm(of)) change(it) else it }
     }
 
+    /** An id identifies a form on its own — a rename must not orphan the
+     * outcome of the save that renamed it. Two create forms have no id, so
+     * only there does the typed name tell them apart. */
     private fun Screen.Pot.isForm(other: Screen.Pot): Boolean =
-        name == other.name && draft["name"] == other.draft["name"]
+        if (id != null) id == other.id else other.id == null && draft["name"] == other.draft["name"]
 }
