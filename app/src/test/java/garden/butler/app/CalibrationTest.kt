@@ -59,20 +59,40 @@ class CalibrationTest {
     }
 
     @Test
-    fun `two reports close together move the wizard to air`() {
+    fun `two reports close together move the wizard to air, and it starts empty`() {
         var s: CalState = calStart(7, 1000, 60)
         s = calStep(s, seen(8000, 1001), 1001)
         s = calStep(s, seen(8100, 1061), 1061)
         s = calStep(s, seen(8200, 1066), 1066)
+        // The reports that proved the board sped up are evidence about its
+        // pace, not about air — "hold it in the AIR" has not been shown yet.
+        // Air begins with nothing, from the newest of them.
         assertEquals(
-            CalState.Air(
-                prevNextS = 7,
-                freshS = FRESH_FAST_S,
-                since = 1000,
-                seen = listOf(Reading(8200, 1066, 1066), Reading(8100, 1061, 1061), Reading(8000, 1001, 1001)),
-            ),
+            CalState.Air(prevNextS = 7, freshS = FRESH_FAST_S, since = 1066, seen = emptyList()),
             s,
         )
+    }
+
+    @Test
+    fun `the dry endpoint cannot be taken from readings that predate the instruction`() {
+        // The regression the median introduced: the sensor is still in soil
+        // while the board proves it sped up, and those soil readings used to
+        // be carried into the air step. A dry calibrated against soil makes a
+        // wet pot read as parched, and the rules water it.
+        var s: CalState = calStart(null, 1000, 60)
+        s = calStep(s, seen(8000, 1010), 1010) // still in soil
+        s = calStep(s, seen(8100, 1015), 1015) // still in soil; the board obeyed
+        assertIs<CalState.Air>(s)
+        assertEquals(emptyList(), tapSamples(s))
+
+        s = calStep(s, seen(13000, 1020), 1020) // now actually in air
+        val water = calStep(s, CalEvent.Tap, 1022) as CalState.Water
+        assertEquals(13000, water.dry) // not 8100, which is soil
+
+        // What the old carry-over would have cost: a pot at raw 8500 reads
+        // half wet on a correct scale and bone dry on the contaminated one.
+        assertEquals(50, moisturePct(8500, 13000, 4000))
+        assertEquals(0, moisturePct(8500, 8100, 4000))
     }
 
     @Test
@@ -173,9 +193,73 @@ class CalibrationTest {
     fun `tapping in air on a live reading fixes dry and starts water`() {
         val s = air(since = 1000, seen = arrayOf(Reading(12000, 1005, 1005), Reading(11900, 1001, 1001)))
         assertEquals(
-            CalState.Water(null, freshS = FRESH_FAST_S, since = 1005, dry = 12000),
+            // Two reports have no middle one, so they average: 11950, not
+            // whichever happened to arrive last.
+            CalState.Water(null, freshS = FRESH_FAST_S, since = 1005, dry = 11950),
             calStep(s, CalEvent.Tap, 1010),
         )
+    }
+
+    @Test
+    fun `the endpoint is the median of the reports this step has seen`() {
+        // One noisy sample used to set a pot's whole scale until somebody
+        // recalibrated. The median throws it away.
+        val noisy =
+            air(
+                since = 1000,
+                seen = arrayOf(Reading(12000, 1011, 1011), Reading(400, 1006, 1006), Reading(11900, 1001, 1001)),
+            )
+        val water = calStep(noisy, CalEvent.Tap, 1015) as CalState.Water
+        assertEquals(11900, water.dry) // not 12000, and emphatically not 400
+        // And the step that follows must be newer than the newest report
+        // used, so none of them can serve the wet end too.
+        assertEquals(1011, water.since)
+    }
+
+    @Test
+    fun `one report is still enough to tap, and is its own median`() {
+        val one = air(since = 1000, seen = arrayOf(Reading(12000, 1005, 1005)))
+        val water = calStep(one, CalEvent.Tap, 1010) as CalState.Water
+        assertEquals(12000, water.dry)
+    }
+
+    @Test
+    fun `three samples are three reports, never one report counted three times`() {
+        // The pitch's rabbit hole. `remember` keeps readings distinct by
+        // readTs, so polling the same report over and over leaves one.
+        var s: CalState = air(since = 1000)
+        repeat(3) { s = calStep(s, CalEvent.Seen(12000, 1005), 1005 + it.toLong()) }
+        assertEquals(1, tapSamples(s).size)
+        s = calStep(s, CalEvent.Seen(11900, 1010), 1010)
+        assertEquals(2, tapSamples(s).size)
+    }
+
+    @Test
+    fun `a report from before the step began is not part of its median`() {
+        val s =
+            air(
+                since = 1000,
+                seen = arrayOf(Reading(12000, 1005, 1005), Reading(9999, 999, 999)),
+            )
+        assertEquals(listOf(12000L), tapSamples(s).map { it.raw })
+        assertEquals(12000, medianRaw(tapSamples(s)))
+    }
+
+    @Test
+    fun `the wizard says how many readings it has and what a tap would take`() {
+        assertEquals("no reading yet", settleLine(0))
+        assertEquals("1 of 3 readings — tapping now takes just this one", settleLine(1))
+        assertEquals("2 of 3 readings — tapping now takes the median of these", settleLine(2))
+        assertEquals("3 of 3 readings — tapping takes their median", settleLine(3))
+    }
+
+    @Test
+    fun `the median of nothing is nothing, and of an even pair is their average`() {
+        assertNull(medianRaw(emptyList()))
+        assertEquals(11950, medianRaw(listOf(Reading(12000, 2, 2), Reading(11900, 1, 1))))
+        // Rounds up rather than truncating: a raw count is not a half.
+        assertEquals(12000, medianRaw(listOf(Reading(12001, 2, 2), Reading(11999, 1, 1))))
+        assertEquals(5, medianRaw(listOf(Reading(4, 2, 2), Reading(5, 1, 1))))
     }
 
     @Test

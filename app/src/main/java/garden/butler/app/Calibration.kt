@@ -116,7 +116,14 @@ fun calStep(s: CalState, e: CalEvent, nowS: Long): CalState =
                 is CalEvent.Seen -> {
                     val seen = remember(s.seen, e, nowS)
                     if (obeyed(seen)) {
-                        CalState.Air(s.prevNextS, FRESH_FAST_S, s.startTs, seen)
+                        // Air starts empty, and starts from the newest report
+                        // that proved the board sped up. Those reports are
+                        // evidence about the board's pace, not about air: the
+                        // sensor was wherever it was, and "hold it in the AIR"
+                        // has not been shown yet. Folding them into the median
+                        // would calibrate dry against soil, and a pot whose
+                        // scale says it is dry gets watered.
+                        CalState.Air(s.prevNextS, FRESH_FAST_S, seen.first().readTs)
                     } else {
                         s.copy(seen = seen)
                     }
@@ -142,8 +149,11 @@ fun calStep(s: CalState, e: CalEvent, nowS: Long): CalState =
                 is CalEvent.Seen -> s.copy(seen = remember(s.seen, e, nowS))
                 CalEvent.Tap ->
                     if (canTap(s, nowS)) {
-                        val dry = s.seen.first()
-                        CalState.Water(s.prevNextS, s.freshS, dry.readTs, dry.raw)
+                        // The newest report is what the next step must be
+                        // newer than; the value is the median of the few
+                        // this step has actually seen.
+                        val dry = medianRaw(tapSamples(s))!!
+                        CalState.Water(s.prevNextS, s.freshS, s.seen.first().readTs, dry)
                     } else {
                         s
                     }
@@ -155,7 +165,7 @@ fun calStep(s: CalState, e: CalEvent, nowS: Long): CalState =
                 is CalEvent.Seen -> s.copy(seen = remember(s.seen, e, nowS))
                 CalEvent.Tap ->
                     if (canTap(s, nowS)) {
-                        CalState.Review(s.prevNextS, s.freshS, s.dry, s.seen.first().raw)
+                        CalState.Review(s.prevNextS, s.freshS, s.dry, medianRaw(tapSamples(s))!!)
                     } else {
                         s
                     }
@@ -180,6 +190,31 @@ fun calStep(s: CalState, e: CalEvent, nowS: Long): CalState =
             }
         is CalState.Finished, is CalState.Cancelled -> s
     }
+
+/** What a tap would capture: the distinct reports this step has seen, newest
+ * first, at most three. Reports from before the step began are excluded —
+ * that is what stops the one that served the dry end serving the wet end
+ * too. `remember` already keeps these distinct by `readTs`, so three samples
+ * are three reports and never one report counted three times. */
+fun tapSamples(s: CalState): List<Reading> =
+    when (s) {
+        is CalState.Air -> s.seen.filter { it.readTs > s.since }
+        is CalState.Water -> s.seen.filter { it.readTs > s.since }
+        else -> emptyList()
+    }.take(SETTLE_SHOWN)
+
+/** The median of what a tap captures, or null with nothing to capture.
+ *
+ * Median, not mean of everything: one noisy sample used to set a pot's whole
+ * scale until somebody recalibrated, and a median throws the outlier away
+ * where a mean would fold it in. Two samples have no middle one, so they
+ * average — which is what the median of an even set is. */
+fun medianRaw(samples: List<Reading>): Long? {
+    if (samples.isEmpty()) return null
+    val sorted = samples.map { it.raw }.sorted()
+    val mid = sorted.size / 2
+    return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid] + 1) / 2
+}
 
 /** The same report polled again is not a new reading. */
 private fun remember(seen: List<Reading>, e: CalEvent.Seen, nowS: Long): List<Reading> =
@@ -206,6 +241,17 @@ fun canTap(s: CalState, nowS: Long): Boolean {
     val newest = seen.firstOrNull() ?: return false
     return newest.readTs > since && nowS - newest.seenS <= freshS
 }
+
+/** How many reports this endpoint has, and what a tap would do with them.
+ * Says it rather than hiding the tap: one reading is a usable calibration,
+ * it is just a worse one than three. */
+fun settleLine(samples: Int): String =
+    when (samples) {
+        0 -> "no reading yet"
+        SETTLE_SHOWN -> "$SETTLE_SHOWN of $SETTLE_SHOWN readings — tapping takes their median"
+        1 -> "1 of $SETTLE_SHOWN readings — tapping now takes just this one"
+        else -> "$samples of $SETTLE_SHOWN readings — tapping now takes the median of these"
+    }
 
 /** A hint, never a refusal: the backend still decides what it accepts. */
 fun calHint(dry: Long, wet: Long): String? =

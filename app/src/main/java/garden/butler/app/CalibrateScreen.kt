@@ -98,12 +98,12 @@ private fun Body(cal: CalState, controller: String, nowS: Long, send: (CalEvent)
             Cancel(send)
         }
         is CalState.Air -> {
-            Readings("Hold the sensor in the AIR. Wait for the number to settle.", cal.seen, nowS)
+            Readings("Hold the sensor in the AIR. Wait for the number to settle.", cal, nowS)
             Button(onClick = { send(CalEvent.Tap) }, enabled = canTap(cal, nowS)) { Text("Tap") }
             Cancel(send)
         }
         is CalState.Water -> {
-            Readings("Hold the sensor in a glass of WATER. Wait for the number to settle.", cal.seen, nowS)
+            Readings("Hold the sensor in a glass of WATER. Wait for the number to settle.", cal, nowS)
             Small("dry ${cal.dry}")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { send(CalEvent.Tap) }, enabled = canTap(cal, nowS)) { Text("Tap") }
@@ -141,14 +141,19 @@ private fun Restoring(controller: String) {
 }
 
 /** The number to watch, how old it is, and the few before it so "settled"
- * is visible rather than guessed. */
+ * is visible rather than guessed — plus how many of the three this endpoint
+ * would be the median of. Tapping with fewer is allowed; it says what it
+ * would use. */
 @Composable
-private fun Readings(instruction: String, seen: List<Reading>, nowS: Long) {
+private fun Readings(instruction: String, cal: CalState, nowS: Long) {
     Centered(instruction)
+    val seen = if (cal is CalState.Air) cal.seen else (cal as CalState.Water).seen
     val newest = seen.firstOrNull()
     Text(newest?.raw?.toString() ?: "—", style = MaterialTheme.typography.displayMedium)
     Small(newest?.let { agoText(it.readTs, nowS) } ?: "waiting for a report")
     if (seen.isNotEmpty()) Small(seen.joinToString(" · ") { "${it.raw}" })
+    val samples = tapSamples(cal)
+    Small(settleLine(samples.size))
 }
 
 @Composable

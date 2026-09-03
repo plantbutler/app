@@ -54,7 +54,10 @@ is on screen. Nothing is queued to send later.
   SpeedingUp → Air → Water → Review → Saving → Finished, with Stalled (Retry / Continue
   slowly / Cancel) when the board never speeds up. Tap captures the newest reading only when
   it is fresh (phone-clock freshness, `seenS`) and newer than the step began, so one report
-  never serves both endpoints. `canCalibrate` refuses without a mapping, unless the pot is in
+  never serves both endpoints. Each endpoint is the median of the reports that step has seen, at
+  most three (`tapSamples`, `medianRaw`): one noisy sample used to set a pot's whole scale until
+  somebody recalibrated. Tapping with fewer than three is allowed and the wizard says what it
+  would take (`settleLine`). `canCalibrate` refuses without a mapping, unless the pot is in
   manual (the rules would water a sensor held in the air), and on a silent board.
 - `GardenViewModel.kt` — `state` (Loading / Trouble / Ready) and `screen` (List / Pot /
   Calibrate). `refresh()` is single-flight and coalesces a request made mid-flight. Every
@@ -119,9 +122,7 @@ ViewModel driver against `MockWebServer` with `Dispatchers.setMain` and a settab
 (`GardenViewModelTest`). The Canvas itself is the one thing without a test: everything it
 draws comes from a pure function that has one. No emulator anywhere.
 
-Known limits, on purpose: no clearing a field (`enabled=0` and `mode=manual` cover the real cases), single-sample capture
-in the wizard (revisit with the real probe — a median of the last three is a five-line change
-in `calStep`), the backend keeps an interval override forever (a process death between
+Known limits, on purpose: no clearing a field (`enabled=0` and `mode=manual` cover the real cases), the backend keeps an interval override forever (a process death between
 arming and restoring leaves the board at 5 s until the reset chip is tapped). Calibration
 readings land in the pot's history like any other, so the wizard shows as a spike on the
 chart. A manual dose bypasses cooldown, daily cap, quiet hours and the float/pos gates
