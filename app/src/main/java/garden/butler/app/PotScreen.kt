@@ -70,6 +70,7 @@ private val VERDICTS = listOf("ok", "too_much", "too_little")
 fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     val state by model.state.collectAsStateWithLifecycle()
     val garden = (state as? UiState.Ready)?.garden
+    val cachedAtS = (state as? UiState.Ready)?.cachedAtS
     val pot = screen.id?.let { garden?.potById(it) }
     // The title follows the pot, not the key: a rename lands here on the
     // next refresh. A pot that vanished keeps the name the form opened on.
@@ -116,6 +117,13 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            cachedAtS?.let {
+                Text(
+                    staleLine(it, nowS),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
             if (pot != null) Text(potLine(pot, nowS), style = MaterialTheme.typography.headlineSmall)
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
@@ -132,11 +140,19 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             }
             if (pot != null && !pot.name.startsWith(ENV_PREFIX)) {
                 val dirtyKeys = changedFields(screen.original, screen.draft).keys + emptied.map { it.key }
-                WaterRow(screen, pot, cannotWater(pot, board, nowS, health?.nextDefault ?: 60, dirtyKeys), model)
+                WaterRow(
+                    screen,
+                    pot,
+                    cannotWater(pot, board, nowS, health?.nextDefault ?: 60, dirtyKeys, cachedAtS),
+                    model,
+                )
             }
+            // Stale: every one of these would be refused, so they look it
+            // rather than only saying so after the tap.
+            val live = cachedAtS == null
             if (pot?.enabled == 1) { // a disabled pot is neither proposed for nor dosed
-                pot.proposal?.let { ProposalCard(it, nowS) { model.approve(it.id) } }
-                pot.lastDose?.let { DoseCard(it, nowS) { v -> model.verdict(it.id, v) } }
+                pot.proposal?.let { ProposalCard(it, nowS, live) { model.approve(it.id) } }
+                pot.lastDose?.let { DoseCard(it, nowS, live) { v -> model.verdict(it.id, v) } }
             }
             if (pot != null) {
                 TextButton(
@@ -152,7 +168,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             if ((screen.draft["mode"] ?: "manual") != "manual" && gaps.isNotEmpty()) {
                 Text("learning needs: ${gaps.joinToString(", ")}", style = MaterialTheme.typography.bodySmall)
             }
-            Form(screen, garden?.health?.controllers.orEmpty().map { it.controller }, collision, dirty, model)
+            Form(screen, garden?.health?.controllers.orEmpty().map { it.controller }, collision, dirty, live, model)
             if (emptied.isNotEmpty()) {
                 Text(
                     "cannot clear: ${emptied.joinToString(", ") { it.label }} — the backend keeps a stored value",
@@ -167,7 +183,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             }
             Button(
                 onClick = model::save,
-                enabled = dirty && named && !screen.saving && emptied.isEmpty() && !collision,
+                enabled = dirty && named && !screen.saving && emptied.isEmpty() && !collision && live,
             ) {
                 Text("Save")
             }
@@ -361,23 +377,28 @@ private fun WaterRow(screen: Screen.Pot, pot: Pot, reason: String?, model: Garde
 }
 
 @Composable
-private fun ProposalCard(p: Proposal, nowS: Long, approve: () -> Unit) {
+private fun ProposalCard(p: Proposal, nowS: Long, enabled: Boolean, approve: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(proposalLine(p, nowS))
-            Button(onClick = approve) { Text("Approve") }
+            Button(onClick = approve, enabled = enabled) { Text("Approve") }
         }
     }
 }
 
 @Composable
-private fun DoseCard(d: LastDose, nowS: Long, verdict: (String) -> Unit) {
+private fun DoseCard(d: LastDose, nowS: Long, enabled: Boolean, verdict: (String) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(doseLine(d, nowS))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 VERDICTS.forEach { v ->
-                    FilterChip(selected = d.verdict == v, onClick = { verdict(v) }, label = { Text(verdictLabel(v)) })
+                    FilterChip(
+                        selected = d.verdict == v,
+                        onClick = { verdict(v) },
+                        enabled = enabled,
+                        label = { Text(verdictLabel(v)) },
+                    )
                 }
             }
         }
@@ -390,6 +411,7 @@ private fun Form(
     controllers: List<String>,
     collision: Boolean,
     dirty: Boolean,
+    live: Boolean,
     model: GardenViewModel,
 ) {
     val draft = screen.draft
@@ -448,7 +470,7 @@ private fun Form(
                     ValueField(POT_FIELDS.first { it.key == "wet_raw" }, draft, model::edit, Modifier.weight(1f))
                     Button(
                         onClick = model::startCalibration,
-                        enabled = screen.id != null && !screen.saving && !dirty,
+                        enabled = screen.id != null && !screen.saving && !dirty && live,
                     ) {
                         Text("Recalibrate")
                     }

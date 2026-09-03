@@ -63,7 +63,7 @@ fun GardenScreen(model: GardenViewModel) {
                 is UiState.Trouble ->
                     Trouble(it, model::refresh, Modifier.align(Alignment.Center))
                 is UiState.Ready ->
-                    GardenList(it.garden, it.refreshing, it.why, listNote, model)
+                    GardenList(it.garden, it.refreshing, it.why, it.cachedAtS, listNote, model)
             }
         }
     }
@@ -88,20 +88,25 @@ private fun GardenList(
     garden: Garden,
     refreshing: Boolean,
     why: String?,
+    cachedAtS: Long?,
     listNote: String?,
     model: GardenViewModel,
 ) {
     val nowS = System.currentTimeMillis() / 1000
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = model::refresh) {
         LazyColumn(Modifier.fillMaxSize()) {
-            if (why != null) {
+            // The age has to be as loud as the numbers it qualifies: a
+            // stale reading shown without it is worse than showing nothing.
+            if (cachedAtS != null) {
+                item { CachedBanner(staleLine(cachedAtS, nowS)) }
+            } else if (why != null) {
                 item { StaleBanner(why) }
             }
             if (garden.problems.isNotEmpty()) {
                 item { ProblemStrip(garden.problems) }
             }
             if (garden.health.controllers.isNotEmpty()) {
-                item { ControllersCard(garden.health, nowS, model::resetInterval) }
+                item { ControllersCard(garden.health, nowS, cachedAtS == null, model::resetInterval) }
             }
             if (listNote != null) {
                 item {
@@ -138,6 +143,19 @@ private fun GardenList(
                 }
             }
         }
+    }
+}
+
+/** Nothing on this screen came from the butler this launch. Loud on
+ * purpose, in the error colour and above everything, because every number
+ * underneath it is a memory. */
+@Composable
+private fun CachedBanner(line: String) {
+    Card(
+        Modifier.fillMaxWidth().padding(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Text(line, Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall)
     }
 }
 
@@ -178,7 +196,7 @@ private fun ProblemStrip(problems: List<String>) {
 /** One line per controller; a leftover interval override (a wizard that
  * could not restore it) gets its reset here. */
 @Composable
-private fun ControllersCard(health: Health, nowS: Long, reset: (String) -> Unit) {
+private fun ControllersCard(health: Health, nowS: Long, live: Boolean, reset: (String) -> Unit) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             health.controllers.forEach { c ->
@@ -189,7 +207,11 @@ private fun ControllersCard(health: Health, nowS: Long, reset: (String) -> Unit)
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (hasOverride(c)) {
-                        AssistChip(onClick = { reset(c.controller) }, label = { Text("reset") })
+                        AssistChip(
+                            onClick = { reset(c.controller) },
+                            enabled = live,
+                            label = { Text("reset") },
+                        )
                     }
                 }
             }

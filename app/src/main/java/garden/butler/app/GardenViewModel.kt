@@ -1,6 +1,7 @@
 package garden.butler.app
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -22,6 +23,9 @@ sealed interface UiState {
         val garden: Garden,
         val refreshing: Boolean = false,
         val why: String? = null, // the last refresh failed; the list stays up
+        /** Non-null means every number here came off the disk at that
+         * moment and nothing has been heard from the butler since. */
+        val cachedAtS: Long? = null,
     ) : UiState
 }
 
@@ -88,6 +92,10 @@ class GardenViewModel(
     val followEveryMs: Long = FOLLOW_EVERY_MS,
     /** The phone's clock in seconds; a test drives it past a wait. */
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
+    /** The last good answer on disk, so there is something to look at off
+     * the tailnet. Null means no cache at all — which is what the tests
+     * that predate it get. */
+    private val cache: GardenCache? = null,
 ) : ViewModel() {
     private val current = MutableStateFlow<UiState>(UiState.Loading)
     val state: StateFlow<UiState> = current
@@ -101,6 +109,25 @@ class GardenViewModel(
 
     private val noteOnList = MutableStateFlow<String?>(null)
     val listNote: StateFlow<String?> = noteOnList
+
+    /** The cache is opened once, and fills any screen a live answer has not
+     * already filled — including a Trouble screen, which is the whole point:
+     * off the tailnet the network fails fast and usually beats the disk, and
+     * refusing to load then would blank the app in exactly the case this
+     * exists for. Only a Ready is left alone, cached or live: it is either
+     * the butler's own answer or this same cache already. */
+    fun openCache() {
+        val store = cache ?: return
+        viewModelScope.launch {
+            val cached = withContext(Dispatchers.IO) { store.read() } ?: return@launch
+            if (current.value is UiState.Ready) return@launch
+            current.value =
+                UiState.Ready(
+                    splitGarden(cached.pots, cached.health, phoneS()),
+                    cachedAtS = cached.atS,
+                )
+        }
+    }
 
     private var polling: Job? = null
     private var polledTs = 0L
@@ -131,6 +158,21 @@ class GardenViewModel(
                                 withContext(Dispatchers.IO) {
                                     splitGarden(backend.pots(), backend.health(), phoneS())
                                 }
+                            withContext(Dispatchers.IO) {
+                                // Nothing derived goes to disk: a stored
+                                // percentage would be read back through
+                                // whatever calibration the pot has when the
+                                // cache is opened, and after a recalibration
+                                // that is a different scale. potLine derives
+                                // it from the cached raw instead.
+                                cache?.write(
+                                    CachedGarden(
+                                        garden.all().map { it.copy(pct = null) },
+                                        garden.health,
+                                        phoneS(),
+                                    ),
+                                )
+                            }
                             UiState.Ready(garden)
                         } catch (why: CancellationException) {
                             throw why // cancellation is not a backend problem
@@ -239,6 +281,15 @@ class GardenViewModel(
 
     private fun nextDefault(): Int = garden?.health?.nextDefault ?: 60
 
+    /** When the screen is showing disk rather than the butler. */
+    private fun cachedAtS(): Long? = (current.value as? UiState.Ready)?.cachedAtS
+
+    /** Why a write must not go out, or null. Nothing is queued for later:
+     * the pitch is a cache, not offline editing, and a dose queued now and
+     * poured whenever the tailnet comes back is a dose nobody asked for
+     * then. */
+    private fun staleRefusal(): String? = cachedAtS()?.let { staleLine(it, nowS()) }
+
     /** One dose to the stored pot — never the draft: the backend waters what
      * it has, so an unsaved controller or dose would water the wrong thing.
      * The checks are cannotWater's; the backend repeats the ones it owns. */
@@ -249,7 +300,7 @@ class GardenViewModel(
         val dirty =
             changedFields(form.original, form.draft).keys +
                 emptiedFields(form.original, form.draft).map { it.key }
-        cannotWater(pot, controllerOf(pot.controller), nowS(), nextDefault(), dirty)?.let { reason ->
+        cannotWater(pot, controllerOf(pot.controller), nowS(), nextDefault(), dirty, cachedAtS())?.let { reason ->
             return onPot(form) { it.copy(waterRefused = reason) }
         }
         val controller = pot.controller ?: return
@@ -409,6 +460,7 @@ class GardenViewModel(
 
     fun save() {
         val form = shown.value as? Screen.Pot ?: return
+        staleRefusal()?.let { why -> return onPot(form) { it.copy(refused = why) } }
         val name = form.draft["name"].orEmpty()
         if (name.isBlank()) return onPot(form) { it.copy(refused = "give the pot a name") }
         // Nicknames stay unique: a create spelt like a stored pot, or a
@@ -446,15 +498,25 @@ class GardenViewModel(
 
     fun approve(cmdId: Long) {
         val from = shown.value as? Screen.Pot ?: return
+        staleRefusal()?.let { why -> return noteOnPot(from, why) }
         act({ "approved: " + backend.approve(cmdId) }) { noteOnPot(from, it) }
     }
 
     fun verdict(cmdId: Long, value: String) {
         val from = shown.value as? Screen.Pot ?: return
+        staleRefusal()?.let { why -> return noteOnPot(from, why) }
         act({ backend.verdict(cmdId, value) }) { noteOnPot(from, it) }
     }
 
-    fun resetInterval(controller: String) =
+    fun resetInterval(controller: String) {
+        staleRefusal()?.let { why ->
+            noteOnList.value = why
+            return
+        }
+        resetIntervalNow(controller)
+    }
+
+    private fun resetIntervalNow(controller: String) =
         act({
             val next = backend.interval(controller, 0)
             "$controller reports every ${next ?: "default"}s again"
@@ -465,6 +527,7 @@ class GardenViewModel(
      * minute old — a pot flipped to auto or a board gone silent since. */
     fun startCalibration() {
         val parent = shown.value as? Screen.Pot ?: return
+        staleRefusal()?.let { why -> return noteOnPot(parent, why) }
         val id = parent.id ?: return
         val name = currentPot(id)?.name ?: parent.original["name"] ?: return
         if (parent.saving) return
@@ -649,6 +712,18 @@ class GardenViewModel(
     /** An id identifies a form on its own — a rename must not orphan the
      * outcome of the save that renamed it. Two create forms have no id, so
      * only there does the typed name tell them apart. */
+    companion object {
+        /** The only thing the Android side has to build: everything else
+         * about this view model is defaulted, so the JVM tests keep using
+         * the plain constructor. */
+        fun factory(cache: GardenCache) =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                    GardenViewModel(cache = cache) as T
+            }
+    }
+
     private fun Screen.Pot.isForm(other: Screen.Pot): Boolean =
         if (id != null) id == other.id else other.id == null && draft["name"] == other.draft["name"]
 }

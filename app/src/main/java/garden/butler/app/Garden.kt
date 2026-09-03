@@ -16,6 +16,10 @@ data class Garden(
     val health: Health,
 )
 
+/** Every pot the answer carried, in one list again: what the cache stores,
+ * since splitting is a screen decision and a cache holds the answer. */
+fun Garden.all(): List<Pot> = pots + env + disabled
+
 /** The pot as the last good read has it; null once it vanished, in which
  * case the open form keeps rendering from its own snapshot. Every screen
  * keys on the id, so a rename moves a nickname and not a pot. */
@@ -98,11 +102,17 @@ fun agoText(thenS: Long, nowS: Long): String {
     }
 }
 
-/** The one supporting line under a pot's name. */
+/** The one supporting line under a pot's name.
+ *
+ * The percentage is the backend's when it sent one and derived here when it
+ * did not — which is what the cache relies on, since it stores no derived
+ * value at all. Same formula either way (`moisturePct` is the backend's,
+ * operation for operation), so a cached pot and a live one read alike. */
 fun potLine(pot: Pot, nowS: Long): String {
     val seen = pot.readTs?.let { agoText(it, nowS) }
+    val pct = pot.pct ?: pot.raw?.let { moisturePct(it, pot.dryRaw, pot.wetRaw) }
     return when {
-        pot.pct != null && seen != null -> "${pot.pct}% · $seen"
+        pct != null && seen != null -> "$pct% · $seen"
         pot.raw != null && seen != null -> "raw ${pot.raw} · $seen"
         else -> "no data yet"
     }

@@ -24,7 +24,12 @@ fun cannotWater(
     nowS: Long,
     nextDefault: Int,
     dirtyKeys: Set<String>,
+    cachedAtS: Long? = null,
 ): String? {
+    // Before anything else: these numbers came off the disk. Watering on
+    // them would be watering a reading nobody has confirmed, and every
+    // check below is being made against a garden that may have moved.
+    if (cachedAtS != null) return staleLine(cachedAtS, nowS)
     if (pot.enabled != 1) return "this pot is disabled — enable it in the form first"
     val c = pot.controller
     if (c == null || pot.outlet == null) return "map a controller and an outlet first"
@@ -104,6 +109,12 @@ fun stillFollowing(issued: Issued?, status: WaterStatus?, nowS: Long): Boolean {
     val open = status == null || status == WaterStatus.Queued || status == WaterStatus.Sent
     return open && nowS - issued.ts <= FOLLOW_MAX_S
 }
+
+/** What is on screen is the last thing the butler said, and how long ago.
+ * One wording, so the banner, the disabled button and the refused action
+ * all say the same thing. */
+fun staleLine(cachedAtS: Long, nowS: Long): String =
+    "the butler is not answering — this is what it last said, ${agoText(cachedAtS, nowS)}"
 
 /** The one confirmation the pitch allows: what is about to happen and what
  * the rules will make of it. Nothing about what might go wrong — a failure

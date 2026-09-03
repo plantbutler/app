@@ -12,7 +12,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.io.File
 import kotlinx.coroutines.delay
 
 private const val REFRESH_EVERY_MS = 60_000L
@@ -22,7 +24,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme { // stock Material3; theming is a no-go in v1
-                App(viewModel())
+                // The cache needs the app's own storage, which is the only
+                // reason this view model is not the no-argument one.
+                val cache = FileGardenCache(File(applicationContext.filesDir, "garden.json"))
+                App(viewModel(factory = GardenViewModel.factory(cache)))
             }
         }
     }
@@ -36,6 +41,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App(model: GardenViewModel) {
     val screen by model.screen.collectAsStateWithLifecycle()
+    // Disk first, so there is something to look at before the network has
+    // been given its five seconds to fail.
+    LaunchedEffect(Unit) { model.openCache() }
     val owner = LocalLifecycleOwner.current
     val calibrating = screen is Screen.Calibrate
     LaunchedEffect(calibrating) {
