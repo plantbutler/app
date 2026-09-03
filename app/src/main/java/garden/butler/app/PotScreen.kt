@@ -124,6 +124,11 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                 pot.proposal?.let { ProposalCard(it, nowS) { model.approve(it.id) } }
                 pot.lastDose?.let { DoseCard(it, nowS) { v -> model.verdict(it.id, v) } }
             }
+            if (pot != null) {
+                TextButton(onClick = { model.openDoses(pot.id, "${pot.name}'s water") }) {
+                    Text("Watering history")
+                }
+            }
             screen.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             val draftPot = draftPot(screen.draft, pot)
             val gaps = learningGaps(draftPot, health?.controllers?.firstOrNull { it.controller == draftPot.controller })

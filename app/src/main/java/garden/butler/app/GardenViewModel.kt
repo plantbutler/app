@@ -51,6 +51,20 @@ sealed interface Screen {
     ) : Screen
 
     data class Calibrate(val parent: Pot, val cal: CalState) : Screen
+
+    /** The watering history, over the form it was opened from — `parent`
+     * null means it was opened from the list and covers the whole garden.
+     * `nowS` is the server's own clock from the answer, so "3h ago" is not
+     * the phone's opinion of a backend timestamp. */
+    data class Doses(
+        val parent: Pot?,
+        val potId: String?,
+        val title: String,
+        val doses: kotlin.collections.List<Dose>? = null, // Screen.List shadows the plain one here
+        val nowS: Long = 0,
+        val loading: Boolean = true,
+        val why: String? = null,
+    ) : Screen
 }
 
 const val CALIBRATION_SAVED_NOTE =
@@ -271,11 +285,50 @@ class GardenViewModel(
         onPot { it.copy(draft = it.draft + (key to value), refused = null, waterRefused = null) }
 
     fun back() {
-        when (shown.value) {
+        when (val here = shown.value) {
             is Screen.Calibrate -> calEvent(CalEvent.Cancel)
+            // Back to the form it was opened over, with its draft intact:
+            // reading the history is not a reason to lose an edit.
+            is Screen.Doses -> shown.value = here.parent ?: Screen.List
             is Screen.Pot -> shown.value = Screen.List
             Screen.List -> Unit
         }
+    }
+
+    /** The watering history: one pot's, or the whole garden's from the
+     * list. The rows come from the backend already attributed, so nothing
+     * here has to guess whose dose was whose. */
+    fun openDoses(potId: String?, title: String) {
+        val parent = shown.value as? Screen.Pot
+        val screen = Screen.Doses(parent, potId, title)
+        noteOnList.value = null
+        shown.value = screen
+        loadDoses(screen)
+    }
+
+    fun reloadDoses() = (shown.value as? Screen.Doses)?.let { loadDoses(it.copy(loading = true, why = null)) }
+
+    private fun loadDoses(screen: Screen.Doses) {
+        shown.value = screen
+        viewModelScope.launch {
+            try {
+                val answer = withContext(Dispatchers.IO) { backend.doses(screen.potId, DOSES_LIMIT) }
+                onDoses(screen) {
+                    it.copy(doses = answer.doses, nowS = answer.now, loading = false, why = null)
+                }
+            } catch (why: CancellationException) {
+                throw why
+            } catch (why: Exception) {
+                // The list already up stays up: a failed reload is weather.
+                onDoses(screen) { it.copy(loading = false, why = why.message ?: why.toString()) }
+            }
+        }
+    }
+
+    /** An answer lands only on the history it was asked for: the user may
+     * have moved on to another pot's, or back to the garden's. */
+    private inline fun onDoses(of: Screen.Doses, change: (Screen.Doses) -> Screen.Doses) {
+        shown.update { if (it is Screen.Doses && it.potId == of.potId && it.parent?.id == of.parent?.id) change(it) else it }
     }
 
     fun save() {

@@ -42,6 +42,7 @@ class GardenViewModelTest {
         @Volatile var potsGate: CountDownLatch? = null
         @Volatile var potGate: CountDownLatch? = null
         @Volatile var failHistory = false
+        @Volatile var failDoses = false
         @Volatile var proposal = false
         @Volatile var lastDose: String? = null
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
@@ -92,7 +93,25 @@ class GardenViewModelTest {
                         )
                     }
                 "/interval" -> MockResponse().setBody("next=${request.body.copy().readUtf8().substringAfter("next=")}\n")
-                else -> MockResponse().setResponseCode(404)
+                else ->
+                    if (request.path?.startsWith("/doses") == true) {
+                        if (failDoses) {
+                            MockResponse().setResponseCode(503).setBody("try again: x\n")
+                        } else {
+                            MockResponse().setBody(
+                                """{"now": $nowS, "doses": [
+                                     {"id": 7, "ml": 100, "cap_s": 30, "flow_ml": 96,
+                                      "state": "acked", "source": "manual",
+                                      "sent_ts": ${nowS - 600}, "acked_ts": ${nowS - 590},
+                                      "pot": "pot-1", "pot_name": "basil"},
+                                     {"id": 6, "ml": 100, "state": "expired",
+                                      "sent_ts": ${nowS - 4000}, "pot": null, "pot_name": null}
+                                   ]}""",
+                            )
+                        }
+                    } else {
+                        MockResponse().setResponseCode(404)
+                    }
             }
         }
 
@@ -338,6 +357,62 @@ class GardenViewModelTest {
         assertNull(form.note)
         val intervals = butler.sent("/interval").map { it.body.readUtf8() }
         assertEquals(listOf("c=b1 next=5", "c=b1 next=120"), intervals)
+    }
+
+    @Test
+    fun `a pot's history opens over its form and Back gives the draft back`() {
+        ready()
+        onMain {
+            open("pot-1")
+            edit("target_low_pct", "35")
+            openDoses("pot-1", "basil's water")
+        }
+        val history = waitFor("the history") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        assertEquals("/doses?pot=pot-1&limit=50", butler.requests.last { it.path?.startsWith("/doses") == true }.path)
+        assertEquals(listOf(7L, 6L), history.doses?.map { it.id })
+        assertEquals(butler.nowS, history.nowS)
+        assertNull(history.why)
+        // Reading the history is not a reason to lose a half-typed edit.
+        onMain { back() }
+        val form = pot()
+        assertEquals("pot-1", form.id)
+        assertEquals("35", form.draft["target_low_pct"])
+    }
+
+    @Test
+    fun `the garden's history asks for every pot and Back goes to the list`() {
+        ready()
+        onMain { openDoses(null, "Watering") }
+        val history = waitFor("the history") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        assertEquals("/doses?limit=50", butler.requests.last { it.path?.startsWith("/doses") == true }.path)
+        // The dose no window claims is listed, not filtered away.
+        assertNull(history.doses?.last()?.pot)
+        assertEquals("expired", history.doses?.last()?.state)
+        onMain { back() }
+        assertEquals(Screen.List, model.screen.value)
+    }
+
+    @Test
+    fun `a failed history load says why instead of an empty list`() {
+        butler.failDoses = true
+        ready()
+        onMain { openDoses("pot-1", "basil's water") }
+        val history = waitFor("the reason") { (model.screen.value as? Screen.Doses)?.takeIf { it.why != null } }
+        assertEquals("try again: x", history.why)
+        assertNull(history.doses)
+        assertEquals(false, history.loading)
+    }
+
+    @Test
+    fun `a failed reload keeps the history that is already up`() {
+        ready()
+        onMain { openDoses("pot-1", "basil's water") }
+        val before = waitFor("the history") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        butler.failDoses = true
+        onMain { reloadDoses() }
+        val after = waitFor("the reason") { (model.screen.value as? Screen.Doses)?.takeIf { it.why != null } }
+        assertEquals("try again: x", after.why)
+        assertEquals(before.doses?.map { it.id }, after.doses?.map { it.id })
     }
 
     @Test
