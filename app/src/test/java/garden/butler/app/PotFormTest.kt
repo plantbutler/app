@@ -8,7 +8,9 @@ import kotlin.test.assertTrue
 
 private val basil =
     Pot(
+        id = "pot-3f9a21",
         name = "basil",
+        species = "Ocimum_basilicum",
         controller = "b1",
         channel = 0,
         outlet = 3,
@@ -45,8 +47,8 @@ class PotFormTest {
 
     @Test
     fun `a bare pot still says its mode and that it is enabled`() {
-        assertEquals(mapOf("mode" to "manual", "enabled" to "1"), wireFields(Pot("new")))
-        assertEquals("0", wireFields(Pot("off", enabled = 0))["enabled"])
+        assertEquals(mapOf("mode" to "manual", "enabled" to "1"), wireFields(Pot(name = "new")))
+        assertEquals("0", wireFields(Pot(name = "off", enabled = 0))["enabled"])
     }
 
     @Test
@@ -80,13 +82,69 @@ class PotFormTest {
     }
 
     @Test
-    fun `the body puts the name first and the fields in wire order`() {
+    fun `the body puts the id and name first and the fields in wire order`() {
         val changed = mapOf("mode" to "learning", "target_low_pct" to "30", "controller" to "b1")
         assertEquals(
-            "name=basil controller=b1 target_low_pct=30 mode=learning",
-            potBody("basil", changed),
+            "id=pot-3f9a21 name=basil controller=b1 target_low_pct=30 mode=learning",
+            potBody("pot-3f9a21", "basil", changed),
         )
-        assertEquals("name=Monstera_deliciosa", potBody(" Monstera  deliciosa\n", emptyMap()))
+        assertEquals("name=Monstera_deliciosa", potBody(null, " Monstera  deliciosa\n", emptyMap()))
+    }
+
+    @Test
+    fun `an id makes it an edit, no id makes it a create, and a rename is neither new nor empty`() {
+        assertEquals("id=pot-3f9a21 name=basil channel=4", potBody("pot-3f9a21", "basil", mapOf("channel" to "4")))
+        assertEquals("name=basil soil=peat", potBody(null, "basil", mapOf("soil" to "peat")))
+        // A rename posts no changed field at all: the name is the edit.
+        assertEquals("id=pot-3f9a21 name=genovese", potBody("pot-3f9a21", "genovese", emptyMap()))
+        // An empty id is not an id: it would key the upsert on nothing.
+        assertEquals("name=basil", potBody("", "basil", emptyMap()))
+        // No name at all: an edit that is not a rename. The backend's own
+        // canonical recalibration body has this shape.
+        assertEquals(
+            "id=pot-3f9a21 dry_raw=13000 wet_raw=4200",
+            potBody("pot-3f9a21", null, mapOf("dry_raw" to "13000", "wet_raw" to "4200")),
+        )
+        assertEquals("id=pot-3f9a21 channel=4", potBody("pot-3f9a21", null, mapOf("channel" to "4")))
+    }
+
+    @Test
+    fun `formDirty sees a rename, a changed field and a blanked one, and nothing else`() {
+        val stored = draftOf(basil)
+        assertFalse(formDirty(stored, stored))
+        assertTrue(formDirty(stored, stored + ("name" to "genovese")))
+        assertTrue(formDirty(stored, stored + ("target_low_pct" to "35")))
+        assertTrue(formDirty(stored, stored + ("controller" to "")))
+        // Retyping the same values, however spelt, is not a change.
+        assertFalse(formDirty(stored, stored + ("name" to " basil ")))
+        assertFalse(formDirty(stored, stored + ("target_low_pct" to "30")))
+        // A blanked name is not a change the wire could carry.
+        assertFalse(formDirty(stored, stored + ("name" to "  ")))
+    }
+
+    @Test
+    fun `the draft carries the nickname, and changedFields never sends it twice`() {
+        assertEquals("basil", draftOf(basil)["name"])
+        assertFalse("name" in wireFields(basil))
+        val renaming = draftOf(basil) + ("name" to "genovese")
+        assertEquals(emptyMap(), changedFields(draftOf(basil), renaming))
+        assertTrue(renamed(draftOf(basil), renaming))
+        assertFalse(renamed(draftOf(basil), draftOf(basil)))
+        // A blanked name is not a rename: the wire cannot clear it.
+        assertFalse(renamed(draftOf(basil), draftOf(basil) + ("name" to "  ")))
+        // A nickname is compared as it would travel, not as it was typed.
+        assertFalse(renamed(draftOf(basil), draftOf(basil) + ("name" to " basil ")))
+    }
+
+    @Test
+    fun `species is an editable field that round-trips through the draft`() {
+        assertTrue(POT_FIELDS.any { it.key == "species" })
+        assertEquals("Ocimum_basilicum", wireFields(basil)["species"])
+        assertEquals("Ocimum_basilicum", draftOf(basil)["species"])
+        assertEquals(
+            mapOf("species" to "Ocimum_basilicum_var_genovese"),
+            changedFields(draftOf(basil), draftOf(basil) + ("species" to "Ocimum basilicum var genovese")),
+        )
     }
 
     @Test
@@ -109,7 +167,7 @@ class PotFormTest {
     @Test
     fun `tokenize leaves an equals sign for the backend to refuse`() {
         assertEquals("a=b", tokenize("a=b"))
-        assertEquals("name=a=b", potBody("a=b", emptyMap()))
+        assertEquals("name=a=b", potBody(null, "a=b", emptyMap()))
     }
 
     @Test
@@ -133,24 +191,40 @@ class PotFormTest {
         val garden =
             Garden(
                 pots = listOf(basil),
-                env = listOf(Pot("env:temp")),
-                disabled = listOf(Pot("Thai_basil", enabled = 0)),
+                env = listOf(Pot(id = "pot-env", name = "env:temp")),
+                disabled = listOf(Pot(id = "pot-thai", name = "Thai_basil", enabled = 0)),
                 problems = emptyList(),
                 health = Health(),
             )
-        assertTrue(nameTaken(garden, "basil"))
-        assertTrue(nameTaken(garden, "Thai basil"))
-        assertTrue(nameTaken(garden, " Thai\u00A0basil "))
-        assertTrue(nameTaken(garden, "env:temp"))
-        assertFalse(nameTaken(garden, "mint"))
-        assertFalse(nameTaken(garden, "Basil"))
+        assertTrue(nameTaken(garden, "basil", selfId = null))
+        assertTrue(nameTaken(garden, "Thai basil", selfId = null))
+        assertTrue(nameTaken(garden, " Thai\u00A0basil ", selfId = null))
+        assertTrue(nameTaken(garden, "env:temp", selfId = null))
+        assertFalse(nameTaken(garden, "mint", selfId = null))
+        assertFalse(nameTaken(garden, "Basil", selfId = null))
+    }
+
+    @Test
+    fun `a pot may keep its own name, but may not take another pot's`() {
+        val garden =
+            Garden(
+                pots = listOf(basil),
+                env = emptyList(),
+                disabled = listOf(Pot(id = "pot-thai", name = "Thai_basil", enabled = 0)),
+                problems = emptyList(),
+                health = Health(),
+            )
+        assertFalse(nameTaken(garden, "basil", selfId = "pot-3f9a21"))
+        assertTrue(nameTaken(garden, "basil", selfId = "pot-other"))
+        assertTrue(nameTaken(garden, "Thai basil", selfId = "pot-3f9a21"))
+        assertFalse(nameTaken(garden, "genovese", selfId = "pot-3f9a21"))
     }
 
     @Test
     fun `the field list is the wire in order`() {
         assertEquals(
             listOf(
-                "controller", "channel", "outlet", "plant_type", "plant_size", "pot_size",
+                "controller", "channel", "outlet", "species", "plant_type", "plant_size", "pot_size",
                 "soil", "dry_raw", "wet_raw", "target_low_pct", "target_high_pct", "dose_ml",
                 "cooldown_h", "daily_cap_ml", "mode", "enabled",
             ),

@@ -64,14 +64,14 @@ private val VERDICTS = listOf("ok", "too_much", "too_little")
 fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     val state by model.state.collectAsStateWithLifecycle()
     val garden = (state as? UiState.Ready)?.garden
-    val pot = screen.name?.let { garden?.potNamed(it) }
+    val pot = screen.id?.let { garden?.potById(it) }
+    // The title follows the pot, not the key: a rename lands here on the
+    // next refresh. A pot that vanished keeps the name the form opened on.
+    val title = pot?.name ?: screen.original["name"] ?: "New pot"
     val nowS = model.nowS()
     val emptied = emptiedFields(screen.original, screen.draft)
-    val dirty =
-        changedFields(screen.original, screen.draft).isNotEmpty() ||
-            emptied.isNotEmpty() ||
-            (screen.name == null && !screen.draft["name"].isNullOrBlank())
-    val collision = screen.name == null && garden != null && nameTaken(garden, screen.draft["name"].orEmpty())
+    val dirty = formDirty(screen.original, screen.draft)
+    val collision = garden != null && nameTaken(garden, screen.draft["name"].orEmpty(), screen.id)
     var askDiscard by remember { mutableStateOf(false) }
     val leave = { if (dirty) askDiscard = true else model.back() }
     BackHandler(onBack = leave)
@@ -99,7 +99,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(screen.name ?: "New pot") },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = leave) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
@@ -113,10 +113,10 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             if (pot != null) Text(potLine(pot, nowS), style = MaterialTheme.typography.headlineSmall)
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
-            if (pot != null && screen.name != null && pot.controller != null && pot.channel != null) {
+            if (pot != null && pot.controller != null && pot.channel != null) {
                 Chart(screen.history, screen.historyWhy, pot, board, health?.nextDefault ?: 60)
             }
-            if (pot != null && screen.name != null && !screen.name.startsWith(ENV_PREFIX)) {
+            if (pot != null && !pot.name.startsWith(ENV_PREFIX)) {
                 val dirtyKeys = changedFields(screen.original, screen.draft).keys + emptied.map { it.key }
                 WaterRow(screen, pot, cannotWater(pot, board, nowS, health?.nextDefault ?: 60, dirtyKeys), model)
             }
@@ -137,7 +137,12 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            val named = screen.name != null || !screen.draft["name"].isNullOrBlank()
+            val named = !screen.draft["name"].isNullOrBlank()
+            // Save goes grey without a name; say so, the way a blanked
+            // stored field says so, rather than leave the user hunting.
+            if (!named) {
+                Text("give the pot a name", style = MaterialTheme.typography.bodySmall)
+            }
             Button(
                 onClick = model::save,
                 enabled = dirty && named && !screen.saving && emptied.isEmpty() && !collision,
@@ -155,6 +160,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
  * hint follows what the user is typing, not only what was saved. */
 private fun draftPot(draft: Map<String, String>, stored: Pot?): Pot =
     (stored ?: Pot(name = "")).copy(
+        species = draft["species"]?.ifBlank { null },
         controller = draft["controller"]?.ifBlank { null },
         channel = draft["channel"]?.toIntOrNull(),
         outlet = draft["outlet"]?.toIntOrNull(),
@@ -306,22 +312,26 @@ private fun Form(
     model: GardenViewModel,
 ) {
     val draft = screen.draft
-    if (screen.name == null) {
-        OutlinedTextField(
-            value = draft["name"].orEmpty(),
-            onValueChange = { model.edit("name", it) },
-            label = { Text("name") },
-            singleLine = true,
-            enabled = !screen.saving, // the save's outcome is addressed to this name
-            modifier = Modifier.fillMaxWidth(),
+    // A stored pot's nickname is editable too: the id is the key, so this
+    // field renames rather than creating a second pot.
+    OutlinedTextField(
+        value = draft["name"].orEmpty(),
+        onValueChange = { model.edit("name", it) },
+        label = { Text("name") },
+        singleLine = true,
+        enabled = !screen.saving,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    if (collision) {
+        Text(
+            if (screen.id == null) {
+                "${tokenize(draft["name"].orEmpty())} already exists — open it from the list"
+            } else {
+                "${tokenize(draft["name"].orEmpty())} is another pot's name"
+            },
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
         )
-        if (collision) {
-            Text(
-                "${tokenize(draft["name"].orEmpty())} already exists — open it from the list",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
     }
     for (field in POT_FIELDS) {
         when (field.key) {
@@ -357,7 +367,7 @@ private fun Form(
                     ValueField(POT_FIELDS.first { it.key == "wet_raw" }, draft, model::edit, Modifier.weight(1f))
                     Button(
                         onClick = model::startCalibration,
-                        enabled = screen.name != null && !screen.saving && !dirty,
+                        enabled = screen.id != null && !screen.saving && !dirty,
                     ) {
                         Text("Recalibrate")
                     }

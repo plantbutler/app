@@ -17,9 +17,21 @@ data class Garden(
 )
 
 /** The pot as the last good read has it; null once it vanished, in which
- * case the open form keeps rendering from its own snapshot. */
+ * case the open form keeps rendering from its own snapshot. Every screen
+ * keys on the id, so a rename moves a nickname and not a pot. */
+fun Garden.potById(id: String): Pot? =
+    if (id.isEmpty()) null else (pots + disabled + env).firstOrNull { it.id == id }
+
+/** By nickname, for the two places that only have one: the wizard's "is
+ * this pot still on the backend" check and the create-time name clash. */
 fun Garden.potNamed(name: String): Pot? =
     (pots + disabled + env).firstOrNull { it.name == name }
+
+/** A pot's key in the list. The id, which a rename does not move; a
+ * backend too old to send one would give every row the same empty key, and
+ * a LazyColumn throws on a duplicate, so fall back to the name there
+ * rather than take the whole list down. */
+fun potKey(pot: Pot): String = pot.id.ifEmpty { "name:" + pot.name }
 
 fun splitGarden(all: List<Pot>, health: Health, nowS: Long): Garden {
     val enabled = all.filter { it.enabled == 1 }

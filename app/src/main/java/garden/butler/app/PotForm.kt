@@ -12,6 +12,7 @@ val POT_FIELDS: List<Field> =
         Field("controller", "controller", numeric = false),
         Field("channel", "channel", numeric = true),
         Field("outlet", "outlet", numeric = true),
+        Field("species", "species", numeric = false),
         Field("plant_type", "plant type", numeric = false),
         Field("plant_size", "plant size", numeric = false),
         Field("pot_size", "pot size", numeric = false),
@@ -39,6 +40,7 @@ fun wireFields(pot: Pot): Map<String, String> {
     put("controller", pot.controller)
     put("channel", pot.channel)
     put("outlet", pot.outlet)
+    put("species", pot.species)
     put("plant_type", pot.plantType)
     put("plant_size", pot.plantSize)
     put("pot_size", pot.potSize)
@@ -91,18 +93,46 @@ fun emptiedFields(original: Map<String, String>, draft: Map<String, String>): Li
         original[field.key] != null && draft[field.key]?.let { tokenize(it).isEmpty() } == true
     }
 
-/** A name that would land on an existing pot: POST /pot upserts, so a
- * "new" pot spelled like an old one would silently edit it. */
-fun nameTaken(garden: Garden, name: String): Boolean = garden.potNamed(tokenize(name)) != null
+/** A name that would land on another pot. The backend keeps nicknames
+ * unique, so a "new" pot spelled like a stored one would be refused —
+ * and renaming a pot to the name it already has is not a clash, which is
+ * why the caller passes the pot's own id. A create has none. */
+fun nameTaken(garden: Garden, name: String, selfId: String?): Boolean {
+    val other = garden.potNamed(tokenize(name)) ?: return false
+    return other.id != selfId
+}
 
-/** The POST /pot body: name first (it is the key), then the changed keys in
- * POT_FIELDS order. Creating is the same call with an empty original. */
-fun potBody(name: String, changed: Map<String, String>): String =
+/** The nickname the form is editing, as the wire would spell it. */
+fun draftName(draft: Map<String, String>): String = tokenize(draft["name"].orEmpty())
+
+/** The draft renames the pot: a non-empty nickname that differs from the
+ * stored one. A blanked name is not a rename — the wire cannot clear it. */
+fun renamed(original: Map<String, String>, draft: Map<String, String>): Boolean {
+    val name = draftName(draft)
+    return name.isNotEmpty() && name != original["name"]
+}
+
+/** Everything the form would post, in one question: is there anything to
+ * save? A rename is not a POT_FIELDS key, so it needs asking separately. */
+fun formDirty(original: Map<String, String>, draft: Map<String, String>): Boolean =
+    changedFields(original, draft).isNotEmpty() ||
+        emptiedFields(original, draft).isNotEmpty() ||
+        renamed(original, draft)
+
+/** The POST /pot body. An id makes it an edit; `name` is sent only when it
+ * is the edit — a nickname resent out of habit would travel as an
+ * instruction and overwrite a rename made from another phone while this
+ * form sat open. No id makes it a create, the name is then required, and
+ * the backend mints the id. The changed keys follow in POT_FIELDS order. */
+fun potBody(id: String?, name: String?, changed: Map<String, String>): String =
     buildList {
-        add("name=" + tokenize(name))
+        if (!id.isNullOrEmpty()) add("id=$id")
+        if (name != null) add("name=" + tokenize(name))
         for (field in POT_FIELDS) changed[field.key]?.let { add("${field.key}=$it") }
     }.joinToString(" ")
 
 /** The form opens pre-filled with the stored values: 30 -> 35 is a
- * two-character edit, not a retype. */
-fun draftOf(pot: Pot): Map<String, String> = wireFields(pot)
+ * two-character edit, not a retype. The nickname rides in the same map so
+ * the form can diff a rename the way it diffs everything else; it is not
+ * a POT_FIELDS key, so changedFields never sends it twice. */
+fun draftOf(pot: Pot): Map<String, String> = wireFields(pot) + ("name" to pot.name)

@@ -11,13 +11,14 @@ class BackendTest {
         val body =
             """
             {"pots": [
-              {"id": 1, "name": "basil", "controller": "b1", "channel": 0,
+              {"id": "pot-3f9a21", "name": "basil", "species": "Ocimum_basilicum",
+               "controller": "b1", "channel": 0,
                "outlet": 3, "plant_type": "basil", "dry_raw": 12000,
                "wet_raw": 4000, "mode": "auto", "enabled": 1,
                "raw": 8123, "pct": 48, "read_ts": 1788291874,
                "proposal": {"id": 17, "ml": 100, "cap_s": 10, "created_ts": 1},
                "brand_new_key": true},
-              {"id": 2, "name": "env:temp", "controller": "b1", "channel": 5,
+              {"id": "pot-7c1b04", "name": "env:temp", "controller": "b1", "channel": 5,
                "mode": "manual", "enabled": 1, "raw": 231, "pct": null,
                "read_ts": 1788291874, "proposal": null}
             ]}
@@ -25,9 +26,13 @@ class BackendTest {
 
         val pots = parsePots(body)
         assertEquals(2, pots.size)
+        assertEquals("pot-3f9a21", pots[0].id)
+        assertEquals("Ocimum_basilicum", pots[0].species)
         assertEquals("basil", pots[0].name)
         assertEquals(48, pots[0].pct)
         assertEquals(100, pots[0].proposal?.ml)
+        assertEquals("pot-7c1b04", pots[1].id)
+        assertNull(pots[1].species)
         assertEquals("env:temp", pots[1].name)
         assertNull(pots[1].pct)
         assertEquals(231, pots[1].raw)
@@ -62,7 +67,8 @@ class BackendTest {
     fun `a pot with every column, a full proposal and a judged dose parses`() {
         val body =
             """
-            {"pots": [{"id": 1, "name": "basil", "controller": "b1", "channel": 0,
+            {"pots": [{"id": "pot-3f9a21", "name": "basil", "species": "Ocimum_basilicum",
+              "controller": "b1", "channel": 0,
               "outlet": 3, "plant_type": "basil", "plant_size": "small",
               "pot_size": "12cm", "soil": "loam", "dry_raw": 12000, "wet_raw": 4000,
               "target_low_pct": 30, "target_high_pct": 60, "dose_ml": 100,
@@ -75,6 +81,8 @@ class BackendTest {
             """.trimIndent()
 
         val pot = parsePots(body).single()
+        assertEquals("pot-3f9a21", pot.id)
+        assertEquals("Ocimum_basilicum", pot.species)
         assertEquals("small", pot.plantSize)
         assertEquals("12cm", pot.potSize)
         assertEquals("loam", pot.soil)

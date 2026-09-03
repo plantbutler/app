@@ -38,8 +38,9 @@ class GardenViewModelTest {
         val requests = CopyOnWriteArrayList<RecordedRequest>()
         @Volatile var nextS: Int? = null
         @Volatile var failPots = false
-        @Volatile var potAnswer = MockResponse().setBody("pot=basil\n")
+        @Volatile var potAnswer = MockResponse().setBody("pot=pot-1 name=basil\n")
         @Volatile var potsGate: CountDownLatch? = null
+        @Volatile var potGate: CountDownLatch? = null
         @Volatile var failHistory = false
         @Volatile var proposal = false
         @Volatile var lastDose: String? = null
@@ -57,12 +58,12 @@ class GardenViewModelTest {
                     } else {
                         MockResponse().setBody(
                             """{"pots": [
-                                 {"name": "basil", "controller": "b1", "channel": 0, "outlet": 3,
+                                 {"id": "pot-1", "name": "basil", "controller": "b1", "channel": 0, "outlet": 3,
                                   "mode": "manual", "target_low_pct": 30, "dose_ml": 100,
                                   "raw": 9000, "read_ts": $nowS
                                   ${if (proposal) ", \"proposal\": {\"id\": 9, \"ml\": 100}" else ""}
                                   ${lastDose?.let { ", \"last_dose\": $it" } ?: ""}},
-                                 {"name": "mint", "controller": "b1", "channel": 1, "mode": "learning"}
+                                 {"id": "pot-2", "name": "mint", "controller": "b1", "channel": 1, "mode": "learning"}
                                ]}""",
                         )
                     }
@@ -74,7 +75,10 @@ class GardenViewModelTest {
                                             "next_s": ${nextS ?: "null"}, "float": 1, "pos": "ok"
                                             ${slot?.let { ", \"command\": $it" } ?: ""}}]}""",
                     )
-                "/pot" -> potAnswer
+                "/pot" -> {
+                    potGate?.await(5, TimeUnit.SECONDS)
+                    potAnswer
+                }
                 "/command" -> commandAnswer
                 "/history?c=b1&ch=0&hours=24&bucket_s=300" ->
                     if (failHistory) {
@@ -162,7 +166,7 @@ class GardenViewModelTest {
     fun `save posts only the changed fields and pops to the list`() {
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             edit("target_low_pct", "35")
             save()
         }
@@ -170,7 +174,91 @@ class GardenViewModelTest {
         val post = butler.posts().single()
         assertEquals("/pot", post.path)
         assertEquals("s3cret", post.getHeader("X-Token"))
-        assertEquals("name=basil target_low_pct=35", post.body.readUtf8())
+        // No name=: this edit is not a rename, and resending the nickname
+        // would overwrite one made from another phone meanwhile.
+        assertEquals("id=pot-1 target_low_pct=35", post.body.readUtf8())
+    }
+
+    @Test
+    fun `a rename posts the id with the new name and keeps the form on the same pot`() {
+        ready()
+        onMain {
+            open("pot-1")
+            edit("name", "genovese")
+            save()
+        }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        val post = butler.posts().single()
+        assertEquals("/pot", post.path)
+        assertEquals("id=pot-1 name=genovese", post.body.readUtf8())
+        // The pot is still reachable under the id it was renamed through.
+        onMain { open("pot-1") }
+        assertEquals("pot-1", pot().id)
+    }
+
+    @Test
+    fun `a rename onto another pot's name is refused before any POST`() {
+        ready()
+        onMain {
+            open("pot-1")
+            edit("name", "mint")
+            save()
+        }
+        val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
+        assertEquals("mint is another pot's name", form.refused)
+        assertEquals(false, form.saving)
+        assertEquals(emptyList(), butler.posts())
+    }
+
+    @Test
+    fun `retyping a pot's own name is neither a clash nor a rename on the wire`() {
+        ready()
+        onMain {
+            open("pot-1")
+            edit("name", " basil ") // the same name, spelt with the user's spaces
+            edit("target_low_pct", "35")
+            save()
+        }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        // Not refused as a duplicate of itself, and not sent as a rename.
+        assertEquals("id=pot-1 target_low_pct=35", butler.posts().single().body.readUtf8())
+    }
+
+    @Test
+    fun `a save's outcome lands on the pot by id, even when the draft moves on before the answer`() {
+        ready()
+        val gate = CountDownLatch(1)
+        butler.potGate = gate
+        onMain {
+            open("pot-1")
+            edit("name", "genovese")
+            save()
+        }
+        waitFor("the POST in flight") { butler.sent("/pot").firstOrNull() }
+        // The user keeps typing while the backend has not answered: the open
+        // form's draft no longer matches what was posted. Keyed on the name,
+        // the outcome would never find its form and the screen would sit on
+        // saving = true for good.
+        onMain { edit("name", "yet_another_name") }
+        gate.countDown()
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        assertEquals("id=pot-1 name=genovese", butler.posts().single().body.readUtf8())
+    }
+
+    @Test
+    fun `the wizard refuses to arm over an unsaved rename`() {
+        ready()
+        onMain {
+            open("pot-1")
+            edit("name", "genovese")
+            startCalibration()
+        }
+        val form = waitFor("the note") { (model.screen.value as? Screen.Pot)?.takeIf { it.note != null } }
+        assertEquals(
+            "save or discard your changes first — the wizard calibrates the stored controller and channel",
+            form.note,
+        )
+        assertEquals(emptyList(), butler.posts())
     }
 
     @Test
@@ -191,7 +279,7 @@ class GardenViewModelTest {
     fun `calibration refuses a pot that is not in manual and posts nothing`() {
         ready()
         onMain {
-            open("mint")
+            open("pot-2")
             startCalibration()
         }
         val form = waitFor("the note") { (model.screen.value as? Screen.Pot)?.takeIf { it.note != null } }
@@ -205,7 +293,7 @@ class GardenViewModelTest {
         butler.nextS = FAST_NEXT_S
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             startCalibration()
         }
         val wizard = waitFor("the wizard") { model.screen.value as? Screen.Calibrate }
@@ -213,7 +301,7 @@ class GardenViewModelTest {
         assertEquals("/interval", butler.posts().single().path)
         assertIs<CalState.SpeedingUp>(wizard.cal)
         assertNull(wizard.cal.prevNextS)
-        assertEquals("basil", wizard.parent.name)
+        assertEquals("pot-1", wizard.parent.id)
         assertEquals(false, wizard.parent.saving)
     }
 
@@ -222,7 +310,7 @@ class GardenViewModelTest {
         butler.nextS = 120
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             startCalibration()
         }
         val wizard = waitFor("the wizard") { model.screen.value as? Screen.Calibrate }
@@ -235,7 +323,7 @@ class GardenViewModelTest {
         butler.nextS = 120
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             startCalibration()
         }
         waitFor("the wizard") { model.screen.value as? Screen.Calibrate }
@@ -246,7 +334,7 @@ class GardenViewModelTest {
         assertIs<CalState.Air>((model.screen.value as Screen.Calibrate).cal)
         onMain { calEvent(CalEvent.Cancel) }
         val form = pot()
-        assertEquals("basil", form.name)
+        assertEquals("pot-1", form.id)
         assertNull(form.note)
         val intervals = butler.sent("/interval").map { it.body.readUtf8() }
         assertEquals(listOf("c=b1 next=5", "c=b1 next=120"), intervals)
@@ -267,7 +355,7 @@ class GardenViewModelTest {
     @Test
     fun `opening a mapped pot fetches its last day onto the form`() {
         ready()
-        onMain { open("basil") }
+        onMain { open("pot-1") }
         val form = waitFor("the curve") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
         val get = butler.requests.single { it.path?.startsWith("/history") == true }
         assertEquals("/history?c=b1&ch=0&hours=24&bucket_s=300", get.path)
@@ -284,17 +372,17 @@ class GardenViewModelTest {
     fun `a failed history fetch says why on the form and keeps it up`() {
         butler.failHistory = true
         ready()
-        onMain { open("basil") }
+        onMain { open("pot-1") }
         val form = waitFor("the reason") { (model.screen.value as? Screen.Pot)?.takeIf { it.historyWhy != null } }
         assertEquals("chart: try again: x", form.historyWhy)
         assertNull(form.history)
-        assertEquals("basil", form.name)
+        assertEquals("pot-1", form.id)
     }
 
     @Test
     fun `a refresh reloads the open form's curve`() {
         ready()
-        onMain { open("basil") }
+        onMain { open("pot-1") }
         waitFor("the curve") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
         onMain { refresh() }
         settled()
@@ -307,7 +395,7 @@ class GardenViewModelTest {
     @Test
     fun `a failed reload keeps the curve up and says why beside it`() {
         ready()
-        onMain { open("basil") }
+        onMain { open("pot-1") }
         val before = waitFor("the curve") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
         butler.failHistory = true
         onMain { refresh() }
@@ -320,7 +408,7 @@ class GardenViewModelTest {
     fun `no answer to the water POST says so and refreshes anyway`() {
         butler.commandAnswer = MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
         ready()
-        onMain { open("basil") }
+        onMain { open("pot-1") }
         val gate = CountDownLatch(1) // the refresh after it would clear the line: hold it
         butler.potsGate = gate
         onMain { water() }
@@ -341,7 +429,7 @@ class GardenViewModelTest {
     fun `a taken slot lands the backend's busy line verbatim, until the slot is free`() {
         butler.commandAnswer = MockResponse().setResponseCode(409).setBody("busy: cmd=3 state=sent\n")
         ready()
-        onMain { open("basil") }
+        onMain { open("pot-1") }
         // The refresh after the POST is held so the slot can turn busy underneath it.
         val gate = CountDownLatch(1)
         butler.potsGate = gate
@@ -367,7 +455,7 @@ class GardenViewModelTest {
         model = GardenViewModel(Backend(server.url("/").toString(), token = "s3cret"), clock = { phoneNow.get() })
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             water()
         }
         val form = waitFor("the issued command") { (model.screen.value as? Screen.Pot)?.takeIf { it.watering != null } }
@@ -388,7 +476,7 @@ class GardenViewModelTest {
     fun `water posts the stored dose with the token and follows the command`() {
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             water()
         }
         val form = waitFor("the issued command") { (model.screen.value as? Screen.Pot)?.takeIf { it.watering != null } }
@@ -410,7 +498,7 @@ class GardenViewModelTest {
         butler.proposal = true
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             water()
         }
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.waterRefused != null } }
@@ -424,7 +512,7 @@ class GardenViewModelTest {
     fun `the issued command reads as done once the pot's last dose acks it`() {
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             water()
         }
         val form = waitFor("the issued command") { (model.screen.value as? Screen.Pot)?.takeIf { it.watering != null } }
@@ -442,7 +530,7 @@ class GardenViewModelTest {
         butler.potAnswer = MockResponse().setResponseCode(400).setBody("refused: x\n")
         ready()
         onMain {
-            open("basil")
+            open("pot-1")
             edit("target_low_pct", "35")
             save()
         }

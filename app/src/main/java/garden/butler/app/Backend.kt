@@ -42,7 +42,12 @@ data class LastDose(
 
 @Serializable
 data class Pot(
+    /** The backend's own key, `pot-3f9a21`. Defaults to empty so a backend
+     * older than the app still decodes; nothing may use "" as a key. */
+    val id: String = "",
+    /** A nickname, editable, unique among pots — not the identity. */
     val name: String,
+    val species: String? = null,
     val controller: String? = null,
     val channel: Int? = null,
     val outlet: Int? = null,
@@ -193,7 +198,9 @@ class Backend(private val baseUrl: String, private val token: String = "") {
 
     fun health(): Health = parseHealth(get("/health"))
 
-    /** `name=<pot> k=v…`, built by potBody(); answers `pot=<name>`. */
+    /** `id=<pot> name=<nickname> k=v…`, built by potBody(); answers
+     * `pot=<id> name=<name>`, which nothing reads: the refresh after it is
+     * what the screen believes. */
     fun postPot(body: String): String = post("/pot", body)
 
     fun approve(cmdId: Long): String = post("/approve", "cmd=$cmdId")

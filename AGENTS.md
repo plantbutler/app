@@ -28,7 +28,8 @@ Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, themi
 
 `app/src/main/java/garden/butler/app/`:
 
-- `Backend.kt` — the wire models (`Pot` with every pots column, `Proposal`, `LastDose`,
+- `Backend.kt` — the wire models (`Pot` with its `pot-xxxxxx` id, its nickname, `species` and
+  every other pots column, `Proposal`, `LastDose`,
   `Health` with `next_default` and per-controller `command`), `Json { ignoreUnknownKeys }`,
   and the one class that touches the network: GETs, and `post()` for `/pot`, `/approve`,
   `/verdict`, `/interval` with the `X-Token` header. Any non-200 throws `Refused(code, text)`
@@ -38,11 +39,15 @@ Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, themi
   came with), `problems` (raised alerts + app-side silence with `next_default`), the
   controller line, proposal and dose lines, `needsVerdict` (a dose acked between 30 min and
   48 h ago with no verdict), `learningGaps` (what the rules need, including the board's
-  `float=1 pos=ok`), `potNamed`.
+  `float=1 pos=ok`), `potById` (the key everything navigates by; an empty id is never a key)
+  and `potNamed` (only the two places that have a name and not an id).
 - `PotForm.kt` — the form is one `Map<String,String>` draft diffed against the stored pot:
   `wireFields`, `tokenize` (Unicode whitespace → `_`, values are single words on the wire),
   `changedFields` (only what changed is posted — a partial upsert), `emptiedFields` (the wire
-  cannot clear a field; the form says so and refuses to save), `potBody`, `nameTaken`.
+  cannot clear a field; the form says so and refuses to save), `potBody(id, name, changed)` (an
+  id makes it an edit and the name rides along, which is how a rename travels; no id makes it a
+  create and the backend mints one), `renamed`, `nameTaken(garden, name, selfId)` (a pot keeping
+  its own name is not a clash).
 - `Calibration.kt` — the recalibration wizard as a pure reducer `calStep(state, event, nowS)`:
   SpeedingUp → Air → Water → Review → Saving → Finished, with Stalled (Retry / Continue
   slowly / Cancel) when the board never speeds up. Tap captures the newest reading only when
@@ -86,8 +91,7 @@ ViewModel driver against `MockWebServer` with `Dispatchers.setMain` and a settab
 (`GardenViewModelTest`). The Canvas itself is the one thing without a test: everything it
 draws comes from a pure function that has one. No emulator anywhere.
 
-Known limits, on purpose: no rename (name is the key; disable and create instead), no
-clearing a field (`enabled=0` and `mode=manual` cover the real cases), single-sample capture
+Known limits, on purpose: no clearing a field (`enabled=0` and `mode=manual` cover the real cases), single-sample capture
 in the wizard (revisit with the real probe — a median of the last three is a five-line change
 in `calStep`), the backend keeps an interval override forever (a process death between
 arming and restoring leaves the board at 5 s until the reset chip is tapped). Calibration
@@ -97,6 +101,14 @@ chart. A manual dose bypasses cooldown, daily cap, quiet hours and the float/pos
 it lands in the dose card and asks for a verdict like any other. The real board does not
 execute commands until "Pump on command": the water row is verified against the fake board.
 No watering history and no touch on the chart, per the pitch.
+
+**2026-09-03.** A pot is a `pot-xxxxxx` id, not a name (backend 0.8.0, decision #16). Every
+screen keys on it: `Screen.Pot.id`, the list's `key`, the wizard's poll. The nickname is
+editable — the name field is on every form, not only a new pot's — and a rename keeps the form,
+the curve and an open dose on the same pot. Pots also carry `species`, the field the care
+lookup will fill. The two remaining name-keyed checks are deliberate: the wizard asks the
+backend whether a pot by that name is still there, and a nickname clash is looked up by name
+because that is what would collide.
 
 ## Toolchain (picked 2026-09-01, CLI-only)
 

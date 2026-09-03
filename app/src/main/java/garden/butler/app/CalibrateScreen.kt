@@ -43,9 +43,11 @@ import kotlinx.coroutines.delay
 @Composable
 fun CalibrateScreen(model: GardenViewModel, screen: Screen.Calibrate) {
     val state by model.state.collectAsStateWithLifecycle()
-    val name = screen.parent.name.orEmpty()
-    val controller =
-        (state as? UiState.Ready)?.garden?.potNamed(name)?.controller ?: "the board"
+    // Through the id: a pot renamed from another phone mid-wizard still
+    // titles this screen, and titles it with the name it now has.
+    val pot = screen.parent.id?.let { (state as? UiState.Ready)?.garden?.potById(it) }
+    val name = pot?.name ?: screen.parent.original["name"].orEmpty()
+    val controller = pot?.controller ?: "the board"
     var nowS by remember { mutableLongStateOf(model.nowS()) }
     val owner = LocalLifecycleOwner.current
     val activity = LocalContext.current as? Activity

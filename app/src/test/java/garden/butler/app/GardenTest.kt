@@ -12,7 +12,8 @@ private fun pot(
     pct: Int? = null,
     raw: Long? = null,
     readTs: Long? = null,
-) = Pot(name = name, enabled = enabled, pct = pct, raw = raw, readTs = readTs)
+    id: String = "pot-$name",
+) = Pot(id = id, name = name, enabled = enabled, pct = pct, raw = raw, readTs = readTs)
 
 private fun controller(
     name: String = "b1",
@@ -46,6 +47,31 @@ private val complete =
     )
 
 class GardenTest {
+    @Test
+    fun `potById finds a pot whatever its nickname, and never on an empty id`() {
+        val garden =
+            splitGarden(
+                listOf(pot("basil", id = "pot-1"), pot("cactus", enabled = 0, id = "pot-2")),
+                Health(ok = true),
+                nowS = 1000,
+            )
+        assertEquals("basil", garden.potById("pot-1")?.name)
+        assertEquals("cactus", garden.potById("pot-2")?.name) // disabled pots stay reachable
+        assertNull(garden.potById("pot-nope"))
+        // A backend too old to send ids leaves them empty: "" is not a key.
+        val old = splitGarden(listOf(pot("basil", id = "")), Health(ok = true), nowS = 1000)
+        assertNull(old.potById(""))
+    }
+
+    @Test
+    fun `the list keys on the id, and falls back to the name when there is none`() {
+        assertEquals("pot-1", potKey(pot("basil", id = "pot-1")))
+        // A backend too old to send ids would key every row the same and a
+        // LazyColumn throws on a duplicate: the names still differ.
+        assertEquals("name:basil", potKey(pot("basil", id = "")))
+        assertEquals("name:mint", potKey(pot("mint", id = "")))
+    }
+
     @Test
     fun `env pots split off and disabled pots vanish`() {
         val garden =
@@ -308,15 +334,15 @@ class GardenTest {
 
     @Test
     fun `the row note nags for a verdict and otherwise stays quiet`() {
-        val judged = Pot("basil", lastDose = dose(ackedTs = 1000))
+        val judged = Pot(name = "basil", lastDose = dose(ackedTs = 1000))
         assertEquals("dose 2h ago, not judged yet", rowNote(judged, 1000 + 2 * 3600))
         assertNull(rowNote(judged, 1000 + 60))
-        assertNull(rowNote(Pot("basil"), 5000))
+        assertNull(rowNote(Pot(name = "basil"), 5000))
     }
 
     @Test
     fun `a disabled pot is never nagged`() {
-        val off = Pot("basil", enabled = 0, lastDose = dose(ackedTs = 1000))
+        val off = Pot(name = "basil", enabled = 0, lastDose = dose(ackedTs = 1000))
         assertNull(rowNote(off, 1000 + 2 * 3600))
     }
 
@@ -327,7 +353,7 @@ class GardenTest {
                 "a controller", "a channel", "an outlet", "calibration (dry and wet)",
                 "a target low %", "a dose",
             ),
-            learningGaps(Pot("new")),
+            learningGaps(Pot(name = "new")),
         )
         val ready = controller(lastSeen = 990, float = 1, pos = "ok")
         assertEquals(emptyList(), learningGaps(complete, ready))
