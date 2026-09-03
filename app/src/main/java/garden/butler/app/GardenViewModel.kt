@@ -336,15 +336,17 @@ class GardenViewModel(
 
     /** Single-flight, like the chart's loader: two quick pulls must not
      * race, or the slower answer lands last and quietly replaces the
-     * fresher list with an older one. */
+     * fresher list with an older one. The flight is shared with the pager,
+     * so a reload also cancels a page that is on its way. */
     private fun loadDoses(screen: Screen.Doses) {
-        shown.value = screen
         dosesFlight?.cancel()
+        val fresh = screen.copy(loadingMore = false)
+        shown.value = fresh
         dosesFlight =
             viewModelScope.launch {
                 try {
-                    val answer = withContext(Dispatchers.IO) { backend.doses(screen.potId, DOSES_LIMIT) }
-                    onDoses(screen) {
+                    val answer = withContext(Dispatchers.IO) { backend.doses(fresh.potId, DOSES_LIMIT) }
+                    onDoses(fresh) {
                         it.copy(
                             doses = answer.doses,
                             more = answer.doses.size >= DOSES_LIMIT,
@@ -362,7 +364,7 @@ class GardenViewModel(
                 } catch (why: Exception) {
                     ensureActive()
                     // The list already up stays up: a failed reload is weather.
-                    onDoses(screen) { it.copy(loading = false, why = why.message ?: why.toString()) }
+                    onDoses(fresh) { it.copy(loading = false, why = why.message ?: why.toString()) }
                 }
             }
     }
@@ -371,25 +373,32 @@ class GardenViewModel(
      * the rows already read do not move under the finger. */
     fun loadOlderDoses() {
         val screen = shown.value as? Screen.Doses ?: return
-        if (screen.loadingMore || !screen.more) return
+        // Not over a reload: its cursor would be anchored to a list that is
+        // about to be replaced, and the row on the old boundary would be
+        // stepped over and never asked for again.
+        if (screen.loading || screen.loadingMore || !screen.more) return
         val cursor = screen.doses?.lastOrNull()?.let(::doseCursor) ?: return
-        shown.value = screen.copy(loadingMore = true, why = null)
-        viewModelScope.launch {
-            try {
-                val answer = withContext(Dispatchers.IO) { backend.doses(screen.potId, DOSES_LIMIT, cursor) }
-                onDoses(screen) {
-                    it.copy(
-                        doses = (it.doses ?: emptyList()) + answer.doses,
-                        more = answer.doses.size >= DOSES_LIMIT,
-                        loadingMore = false,
-                    )
+        dosesFlight?.cancel()
+        val asking = screen.copy(loadingMore = true, why = null)
+        shown.value = asking
+        dosesFlight =
+            viewModelScope.launch {
+                try {
+                    val answer = withContext(Dispatchers.IO) { backend.doses(asking.potId, DOSES_LIMIT, cursor) }
+                    onDoses(asking) {
+                        it.copy(
+                            doses = (it.doses ?: emptyList()) + answer.doses,
+                            more = answer.doses.size >= DOSES_LIMIT,
+                            loadingMore = false,
+                        )
+                    }
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    ensureActive()
+                    onDoses(asking) { it.copy(loadingMore = false, why = why.message ?: why.toString()) }
                 }
-            } catch (why: CancellationException) {
-                throw why
-            } catch (why: Exception) {
-                onDoses(screen) { it.copy(loadingMore = false, why = why.message ?: why.toString()) }
             }
-        }
     }
 
     /** An answer lands only on the history it was asked for: the user may

@@ -46,6 +46,7 @@ class GardenViewModelTest {
         @Volatile var dosesSayNow = true
         /** A first page as full as the app asks for, so there is a second. */
         @Volatile var dosesPageFull = false
+        @Volatile var dosesGate: CountDownLatch? = null
         @Volatile var proposal = false
         @Volatile var lastDose: String? = null
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
@@ -116,6 +117,7 @@ class GardenViewModelTest {
          * unless dosesPageFull, when the first page is as long as the app
          * asked for and the second one ends it. */
         private fun dosesFor(path: String): MockResponse {
+            dosesGate?.takeIf { "before=" in path }?.await(5, TimeUnit.SECONDS)
             if (failDoses) return MockResponse().setResponseCode(503).setBody("try again: x\n")
             val now = if (dosesSayNow) "\"now\": $nowS," else ""
             if (dosesPageFull) {
@@ -537,6 +539,53 @@ class GardenViewModelTest {
         assertEquals(1L, second.doses?.last()?.id)
         assertEquals(false, second.more)
         assertEquals(false, second.loadingMore)
+    }
+
+    @Test
+    fun `a page that arrives after a reload does not land on the list that replaced it`() {
+        butler.dosesPageFull = true
+        ready()
+        onMain { openDoses("pot-1", "basil's water") }
+        val first = waitFor("a full page") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        assertEquals(DOSES_LIMIT, first.doses?.size)
+
+        // Load older, held on the wire, then pull to refresh over it.
+        val gate = CountDownLatch(1)
+        butler.dosesGate = gate
+        onMain { loadOlderDoses() }
+        waitFor("the page in flight") { butler.requests.lastOrNull { it.path?.contains("before=") == true } }
+        onMain { reloadDoses() }
+        val reloaded = waitFor("the reload") {
+            (model.screen.value as? Screen.Doses)?.takeIf { it.doses?.size == DOSES_LIMIT && !it.loading }
+        }
+        gate.countDown()
+        Thread.sleep(300)
+
+        // The held page must not append onto the list that replaced it: its
+        // cursor belonged to a list that no longer exists, and appending it
+        // would step over whatever arrived in between.
+        val after = model.screen.value as Screen.Doses
+        assertEquals(DOSES_LIMIT, after.doses?.size)
+        assertEquals(reloaded.doses?.map { it.id }, after.doses?.map { it.id })
+        assertEquals(false, after.loadingMore)
+    }
+
+    @Test
+    fun `load older is refused while a reload is on the wire`() {
+        butler.dosesPageFull = true
+        ready()
+        onMain { openDoses("pot-1", "basil's water") }
+        waitFor("a full page") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        butler.potsGate = CountDownLatch(1) // nothing to do with /doses; just a pause
+        onMain {
+            reloadDoses()
+            loadOlderDoses()
+        }
+        Thread.sleep(200)
+        butler.potsGate?.countDown()
+        // Only the reload asked; the pager stood down rather than anchoring
+        // a cursor to a list about to be replaced.
+        assertEquals(0, butler.requests.count { it.path?.contains("before=") == true })
     }
 
     @Test
