@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -99,12 +100,26 @@ private fun DoseList(screen: Screen.Doses, doses: List<Dose>, model: GardenViewM
                 }
             }
             items(doses, key = { it.id }) { dose -> DoseRow(dose, screen.potId == null, screen.nowS) }
-            if (doses.size >= DOSES_LIMIT) {
+            if (screen.more) {
                 item {
-                    // The commands table is never pruned, so this list is
-                    // bounded rather than complete. Say which.
+                    // The commands table is never pruned, so the list is a
+                    // page at a time rather than everything at once.
+                    Column(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (screen.loadingMore) {
+                            CircularProgressIndicator()
+                        } else {
+                            Button(onClick = model::loadOlderDoses) { Text("Load older") }
+                        }
+                    }
+                }
+            } else if (doses.isNotEmpty()) {
+                item {
                     Text(
-                        "The last ${doses.size}. Older doses are on the butler, not here.",
+                        "That is all of it.",
                         Modifier.padding(16.dp),
                         style = MaterialTheme.typography.labelSmall,
                     )

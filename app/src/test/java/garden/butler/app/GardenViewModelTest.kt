@@ -44,6 +44,8 @@ class GardenViewModelTest {
         @Volatile var failHistory = false
         @Volatile var failDoses = false
         @Volatile var dosesSayNow = true
+        /** A first page as full as the app asks for, so there is a second. */
+        @Volatile var dosesPageFull = false
         @Volatile var proposal = false
         @Volatile var lastDose: String? = null
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
@@ -82,38 +84,67 @@ class GardenViewModelTest {
                     potAnswer
                 }
                 "/command" -> commandAnswer
-                "/history?c=b1&ch=0&hours=24&bucket_s=300" ->
-                    if (failHistory) {
-                        MockResponse().setResponseCode(503).setBody("try again: x\n")
-                    } else {
-                        MockResponse().setBody(
-                            """{"controller": "b1", "channel": 0, "since": ${nowS - 86400}, "to": $nowS,
-                                "bucket_s": 300,
-                                "points": [{"ts": ${nowS - 600}, "raw": 9010, "lo": 9000, "hi": 9020, "n": 5},
-                                           {"ts": ${nowS - 300}, "raw": 8990, "n": 4}]}""",
-                        )
-                    }
                 "/interval" -> MockResponse().setBody("next=${request.body.copy().readUtf8().substringAfter("next=")}\n")
                 else ->
-                    if (request.path?.startsWith("/doses") == true) {
-                        if (failDoses) {
+                    if (request.path?.startsWith("/history") == true) {
+                        if (failHistory) {
                             MockResponse().setResponseCode(503).setBody("try again: x\n")
                         } else {
+                            // Answers whatever window was asked for, so a test
+                            // can tell one from another by what comes back.
+                            val q = request.path!!.substringAfter("?").split("&").associate {
+                                it.substringBefore("=") to it.substringAfter("=")
+                            }
+                            val hours = q["hours"]!!.toLong()
+                            val bucket = q["bucket_s"]!!.toInt()
                             MockResponse().setBody(
-                                """{${if (dosesSayNow) "\"now\": $nowS," else ""} "doses": [
-                                     {"id": 7, "ml": 100, "cap_s": 30, "flow_ml": 96,
-                                      "state": "acked", "source": "manual",
-                                      "sent_ts": ${nowS - 600}, "acked_ts": ${nowS - 590},
-                                      "pot": "pot-1", "pot_name": "basil"},
-                                     {"id": 6, "ml": 100, "state": "expired",
-                                      "sent_ts": ${nowS - 4000}, "pot": null, "pot_name": null}
-                                   ]}""",
+                                """{"controller": "b1", "channel": 0, "since": ${nowS - hours * 3600},
+                                    "to": $nowS, "bucket_s": $bucket,
+                                    "points": [{"ts": ${nowS - 600}, "raw": 9010, "lo": 9000, "hi": 9020, "n": 5},
+                                               {"ts": ${nowS - 300}, "raw": 8990, "n": 4}]}""",
                             )
                         }
+                    } else if (request.path?.startsWith("/doses") == true) {
+                        dosesFor(request.path!!)
                     } else {
                         MockResponse().setResponseCode(404)
                     }
             }
+        }
+
+        /** Two rows without a cursor, one older row behind it with one —
+         * unless dosesPageFull, when the first page is as long as the app
+         * asked for and the second one ends it. */
+        private fun dosesFor(path: String): MockResponse {
+            if (failDoses) return MockResponse().setResponseCode(503).setBody("try again: x\n")
+            val now = if (dosesSayNow) "\"now\": $nowS," else ""
+            if (dosesPageFull) {
+                val ids = if ("before=" in path) listOf(1L) else (1..DOSES_LIMIT).map { 1000L - it }
+                val rows = ids.joinToString(",") { id ->
+                    """{"id": $id, "ml": 100, "state": "acked", "flow_ml": 100,
+                         "sent_ts": ${nowS - id}, "acked_ts": ${nowS - id},
+                         "pot": "pot-1", "pot_name": "basil"}"""
+                }
+                return MockResponse().setBody("""{$now "doses": [$rows]}""")
+            }
+            return MockResponse().setBody(
+                if ("before=" in path) {
+                    """{$now "doses": [
+                         {"id": 3, "ml": 50, "state": "acked", "flow_ml": 50,
+                          "sent_ts": ${nowS - 90000}, "acked_ts": ${nowS - 89990},
+                          "pot": "pot-1", "pot_name": "basil"}
+                       ]}"""
+                } else {
+                    """{$now "doses": [
+                         {"id": 7, "ml": 100, "cap_s": 30, "flow_ml": 96,
+                          "state": "acked", "source": "manual",
+                          "sent_ts": ${nowS - 600}, "acked_ts": ${nowS - 590},
+                          "pot": "pot-1", "pot_name": "basil"},
+                         {"id": 6, "ml": 100, "state": "expired",
+                          "sent_ts": ${nowS - 4000}, "pot": null, "pot_name": null}
+                       ]}"""
+                },
+            )
         }
 
         fun sent(path: String) = requests.filter { it.path == path }
@@ -422,6 +453,90 @@ class GardenViewModelTest {
         // The phone's own clock, not 0 — which would render the whole list
         // as "0s ago" and look like fact.
         assertEquals(true, history.nowS >= butler.nowS)
+    }
+
+    @Test
+    fun `the chart window changes what is asked for, and drops the old curve first`() {
+        ready()
+        onMain { open("pot-1") }
+        val day = waitFor("the day") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
+        assertEquals(ChartWindow.DAY, day.window)
+        assertEquals("/history?c=b1&ch=0&hours=24&bucket_s=300", butler.histories().last().path)
+
+        onMain { setChartWindow(ChartWindow.MONTH) }
+        val month = waitFor("the month") {
+            (model.screen.value as? Screen.Pot)?.takeIf { it.window == ChartWindow.MONTH && it.history != null }
+        }
+        assertEquals("/history?c=b1&ch=0&hours=720&bucket_s=3600", butler.histories().last().path)
+        assertEquals(3600, month.history?.bucketS)
+        // A month's shape drawn under a "day" chip would be a lie, so the
+        // old curve goes before the new one arrives.
+        assertEquals(butler.nowS - 720 * 3600, month.history?.since)
+    }
+
+    @Test
+    fun `asking for the window already shown fetches nothing`() {
+        ready()
+        onMain { open("pot-1") }
+        waitFor("the curve") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
+        val before = butler.histories().size
+        onMain { setChartWindow(ChartWindow.DAY) }
+        Thread.sleep(200)
+        assertEquals(before, butler.histories().size)
+    }
+
+    @Test
+    fun `a refresh reloads the window that is up, not the day`() {
+        ready()
+        onMain { open("pot-1") }
+        waitFor("the curve") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
+        onMain { setChartWindow(ChartWindow.WEEK) }
+        waitFor("the week") {
+            (model.screen.value as? Screen.Pot)?.takeIf { it.window == ChartWindow.WEEK && it.history != null }
+        }
+        onMain { refresh() }
+        settled()
+        waitFor("the reload") { butler.histories().lastOrNull()?.takeIf { it.path?.contains("hours=168") == true } }
+        assertEquals("/history?c=b1&ch=0&hours=168&bucket_s=1800", butler.histories().last().path)
+    }
+
+    @Test
+    fun `a short page is the whole history and offers nothing behind it`() {
+        ready()
+        onMain { openDoses("pot-1", "basil's water") }
+        val first = waitFor("the history") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        assertEquals(listOf(7L, 6L), first.doses?.map { it.id })
+        assertEquals(false, first.more)
+        // And asking anyway fetches nothing.
+        val before = butler.requests.count { it.path?.startsWith("/doses") == true }
+        onMain { loadOlderDoses() }
+        Thread.sleep(200)
+        assertEquals(before, butler.requests.count { it.path?.startsWith("/doses") == true })
+    }
+
+    @Test
+    fun `older doses append behind the ones already read, on the last row's own cursor`() {
+        butler.dosesPageFull = true
+        ready()
+        onMain { openDoses("pot-1", "basil's water") }
+        val first = waitFor("a full page") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        assertEquals(DOSES_LIMIT, first.doses?.size)
+        assertEquals(true, first.more)
+        val oldest = first.doses!!.last()
+
+        onMain { loadOlderDoses() }
+        val second = waitFor("the page behind it") {
+            (model.screen.value as? Screen.Doses)?.takeIf { (it.doses?.size ?: 0) > DOSES_LIMIT }
+        }
+        // The cursor is the whole sort key of the oldest row on screen.
+        val asked = butler.requests.last { it.path?.startsWith("/doses") == true }.path!!
+        assertEquals(true, "before=${oldest.sentTs}" in asked)
+        assertEquals(true, "before_id=${oldest.id}" in asked)
+        // Appended, not replacing: what was read does not move under the finger.
+        assertEquals(first.doses, second.doses?.take(DOSES_LIMIT))
+        assertEquals(1L, second.doses?.last()?.id)
+        assertEquals(false, second.more)
+        assertEquals(false, second.loadingMore)
     }
 
     @Test

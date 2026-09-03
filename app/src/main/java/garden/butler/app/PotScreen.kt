@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -32,12 +34,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
@@ -114,7 +120,15 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
             if (pot != null && pot.controller != null && pot.channel != null) {
-                Chart(screen.history, screen.historyWhy, pot, board, health?.nextDefault ?: 60)
+                Chart(
+                    screen.history,
+                    screen.historyWhy,
+                    pot,
+                    board,
+                    health?.nextDefault ?: 60,
+                    screen.window,
+                    model::setChartWindow,
+                )
             }
             if (pot != null && !pot.name.startsWith(ENV_PREFIX)) {
                 val dirtyKeys = changedFields(screen.original, screen.draft).keys + emptied.map { it.key }
@@ -184,13 +198,34 @@ private fun draftPot(draft: Map<String, String>, stored: Pot?): Pot =
  * A silent stretch is a hole, not a straight line across it; the last dose
  * is a hairline. */
 @Composable
-private fun Chart(history: History?, why: String?, pot: Pot, board: ControllerHealth?, nextDefault: Int) {
+private fun Chart(
+    history: History?,
+    why: String?,
+    pot: Pot,
+    board: ControllerHealth?,
+    nextDefault: Int,
+    window: ChartWindow,
+    onWindow: (ChartWindow) -> Unit,
+) {
+    // The chips stay up while the next window loads: they are how you get
+    // back, and a spinner you cannot leave is a trap.
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ChartWindow.entries.forEach { w ->
+            FilterChip(selected = w == window, onClick = { onWindow(w) }, label = { Text(w.label) })
+        }
+    }
     if (history == null) {
-        if (why == null) Text("loading the last 24 h…", style = MaterialTheme.typography.bodySmall)
+        if (why == null) Text("loading the last ${window.label}…", style = MaterialTheme.typography.bodySmall)
         why?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         return
     }
     val caption = chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX))
+    // Where the finger is, in pixels, and how wide the canvas is. The
+    // decision itself is scrubbed(), a pure function with a test; this is
+    // only the plumbing. -1 means nothing is touching it.
+    var scrubX by remember { mutableFloatStateOf(-1f) }
+    var widthPx by remember { mutableIntStateOf(0) }
+    var scrubText: String? = null
     if (history.points.isNotEmpty()) {
         val calibrated = isCalibrated(pot.dryRaw, pot.wetRaw)
         val gapS = chartGapS(history.bucketS, board, nextDefault)
@@ -199,13 +234,41 @@ private fun Chart(history: History?, why: String?, pot: Pot, board: ControllerHe
         val range = chartRange(series, calibrated)
         val ticksY = yTicks(range, calibrated)
         val zone = ZoneId.systemDefault()
-        val ticksX = remember(history.since, history.to, zone) { timeTicks(history.since, history.to, zone) }
+        val ticksX =
+            remember(history.since, history.to, zone, window) { windowTicks(window, history.since, history.to, zone) }
+        val scrub =
+            if (scrubX >= 0 && widthPx > 0) {
+                scrubbed(series, scrubX / widthPx.toDouble(), history.since, history.to)
+            } else {
+                null
+            }
+        scrubText = scrub?.let { scrubLabel(it, calibrated, zone) }
         val primary = MaterialTheme.colorScheme.primary
         val tertiary = MaterialTheme.colorScheme.tertiary
         val grid = MaterialTheme.colorScheme.outlineVariant
         val label = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
         val measurer = rememberTextMeasurer()
-        Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+        Canvas(
+            Modifier.fillMaxWidth()
+                .height(180.dp)
+                .onSizeChanged { widthPx = it.width }
+                // Horizontal only, so dragging the chart never fights the
+                // form scrolling underneath it.
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { scrubX = it.x },
+                        onDragEnd = { scrubX = -1f },
+                        onDragCancel = { scrubX = -1f },
+                    ) { change, _ -> scrubX = change.position.x }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(onPress = {
+                        scrubX = it.x
+                        tryAwaitRelease()
+                        scrubX = -1f
+                    })
+                },
+        ) {
             val pad = 2.dp.toPx()
             val labelH = measurer.measure("00:00", label).size.height
             val top = labelH.toFloat() // the top value label sits above its gridline
@@ -238,6 +301,10 @@ private fun Chart(history: History?, why: String?, pot: Pot, board: ControllerHe
             pot.lastDose?.sentTs?.takeIf { it in history.since..history.to }?.let { ts ->
                 drawLine(tertiary, Offset(x(ts), top), Offset(x(ts), bottom), 1.dp.toPx())
             }
+            scrub?.let { s ->
+                drawLine(primary, Offset(x(s.ts), top), Offset(x(s.ts), bottom), 1.dp.toPx())
+                drawCircle(primary, 4.dp.toPx(), Offset(x(s.ts), y(s.value)))
+            }
             for (t in ticksY) {
                 val text = measurer.measure(t.label, label)
                 drawText(text, topLeft = Offset(pad, y(t.at) - text.size.height))
@@ -253,7 +320,13 @@ private fun Chart(history: History?, why: String?, pot: Pot, board: ControllerHe
             }
         }
     }
-    Text(caption, style = MaterialTheme.typography.bodySmall)
+    // Under the finger, the sample's own value and its own time — never an
+    // interpolation, which would be a reading that never happened.
+    if (scrubText != null) {
+        Text(scrubText, style = MaterialTheme.typography.bodyMedium)
+    } else {
+        Text(caption, style = MaterialTheme.typography.bodySmall)
+    }
     why?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }
 
