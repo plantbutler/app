@@ -159,7 +159,7 @@ fun proposalLine(p: Proposal, nowS: Long): String {
     return parts.joinToString(", ")
 }
 
-/** "<source> dose 100 ml · 40min ago · acked, meter 96 ml". The verdict is
+/** "<source> dose 100 ml · 40min ago · confirmed, meter 96 ml". The verdict is
  * not here: the chips beside it show it. */
 fun doseLine(d: LastDose, nowS: Long): String {
     val ml = d.ml?.toString() ?: "?"
@@ -167,8 +167,9 @@ fun doseLine(d: LastDose, nowS: Long): String {
     (d.ackedTs ?: d.sentTs)?.let { parts += agoText(it, nowS) }
     parts +=
         when (d.state) {
-            "sent" -> "sent, not acked yet"
-            "expired" -> "expired, never acked"
+            "sent" -> "handed over, waiting for the board to confirm"
+            "expired" -> "expired, the board never confirmed it"
+            "acked" -> "confirmed" + (d.flowMl?.let { ", meter $it ml" } ?: "")
             else -> d.state + (d.flowMl?.let { ", meter $it ml" } ?: "")
         }
     return parts.joinToString(" · ")
