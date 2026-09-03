@@ -102,11 +102,17 @@ fun agoText(thenS: Long, nowS: Long): String {
     }
 }
 
-/** The one supporting line under a pot's name. */
+/** The one supporting line under a pot's name.
+ *
+ * The percentage is the backend's when it sent one and derived here when it
+ * did not — which is what the cache relies on, since it stores no derived
+ * value at all. Same formula either way (`moisturePct` is the backend's,
+ * operation for operation), so a cached pot and a live one read alike. */
 fun potLine(pot: Pot, nowS: Long): String {
     val seen = pot.readTs?.let { agoText(it, nowS) }
+    val pct = pot.pct ?: pot.raw?.let { moisturePct(it, pot.dryRaw, pot.wetRaw) }
     return when {
-        pot.pct != null && seen != null -> "${pot.pct}% · $seen"
+        pct != null && seen != null -> "$pct% · $seen"
         pot.raw != null && seen != null -> "raw ${pot.raw} · $seen"
         else -> "no data yet"
     }

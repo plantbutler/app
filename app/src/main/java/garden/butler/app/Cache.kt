@@ -51,7 +51,15 @@ class FileGardenCache(private val file: File) : GardenCache {
             // previous good cache, not half of this one.
             val tmp = File(file.parentFile, file.name + ".tmp")
             tmp.writeText(json.encodeToString(CachedGarden.serializer(), cached))
-            tmp.renameTo(file)
+            // renameTo fails silently on some filesystems; a leftover .tmp
+            // would then sit there forever while the cache quietly stopped
+            // updating. Fall back to writing in place — worth the smaller
+            // window, since the alternative is a cache frozen at whatever
+            // it last managed to rename.
+            if (!tmp.renameTo(file)) {
+                file.writeText(tmp.readText())
+                tmp.delete()
+            }
         } catch (why: Exception) {
             // A cache that cannot be written is a cache miss next launch.
         }

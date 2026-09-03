@@ -88,7 +88,11 @@ is on screen. Nothing is queued to send later.
   percentage would be re-read through whatever calibration the pot has when the cache is opened,
   and after a recalibration the curve would lie. Every failure is a miss — a cache that throws on
   a half-written file would take the app down for a convenience — and a write goes through a temp
-  file, so a kill mid-write leaves the previous good cache.
+  file, so a kill mid-write leaves the previous good cache. The cache fills a Trouble screen as
+  well as an empty one: off the tailnet the network fails fast and usually beats the disk, and
+  refusing to load then would blank the app in the one case it exists for. Only a Ready is left
+  alone. `pct` is stripped before writing and `potLine` derives it back from the cached raw, so
+  nothing derived is ever read through a calibration it was not taken with.
 - `Water.kt` — the water-now button as pure decisions: `cannotWater` (disabled pot, no
   mapping, no dose, an unsaved controller/outlet/dose edit, a silent board, a busy slot, a
   proposal waiting — in that order), `waterStatus` from `/pots` `last_dose` and `/health`'s

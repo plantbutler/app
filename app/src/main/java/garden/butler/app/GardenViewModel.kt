@@ -110,14 +110,17 @@ class GardenViewModel(
     private val noteOnList = MutableStateFlow<String?>(null)
     val listNote: StateFlow<String?> = noteOnList
 
-    /** The cache is opened once, and only ever fills a screen that is still
-     * empty: a live answer that beat it to the screen must not be replaced
-     * by an older one from disk. */
+    /** The cache is opened once, and fills any screen a live answer has not
+     * already filled — including a Trouble screen, which is the whole point:
+     * off the tailnet the network fails fast and usually beats the disk, and
+     * refusing to load then would blank the app in exactly the case this
+     * exists for. Only a Ready is left alone, cached or live: it is either
+     * the butler's own answer or this same cache already. */
     fun openCache() {
         val store = cache ?: return
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) { store.read() } ?: return@launch
-            if (current.value !is UiState.Loading) return@launch
+            if (current.value is UiState.Ready) return@launch
             current.value =
                 UiState.Ready(
                     splitGarden(cached.pots, cached.health, phoneS()),
@@ -156,7 +159,19 @@ class GardenViewModel(
                                     splitGarden(backend.pots(), backend.health(), phoneS())
                                 }
                             withContext(Dispatchers.IO) {
-                                cache?.write(CachedGarden(garden.all(), garden.health, phoneS()))
+                                // Nothing derived goes to disk: a stored
+                                // percentage would be read back through
+                                // whatever calibration the pot has when the
+                                // cache is opened, and after a recalibration
+                                // that is a different scale. potLine derives
+                                // it from the cached raw instead.
+                                cache?.write(
+                                    CachedGarden(
+                                        garden.all().map { it.copy(pct = null) },
+                                        garden.health,
+                                        phoneS(),
+                                    ),
+                                )
                             }
                             UiState.Ready(garden)
                         } catch (why: CancellationException) {

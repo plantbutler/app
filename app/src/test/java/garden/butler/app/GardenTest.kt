@@ -333,6 +333,20 @@ class GardenTest {
     }
 
     @Test
+    fun `a pot with no percentage of its own gets one from its own calibration`() {
+        // What a cached pot looks like: the backend's derived pct is not
+        // stored, so the line derives it from the raw and the two points
+        // that travelled with it — the same formula, so cached and live
+        // pots read alike.
+        val cached = Pot(name = "basil", raw = 8000, dryRaw = 12000, wetRaw = 4000, readTs = 900)
+        assertEquals("50% · 1min ago", potLine(cached, 1000))
+        // The backend's own number still wins when it sent one.
+        assertEquals("48% · 1min ago", potLine(cached.copy(pct = 48), 1000))
+        // Without calibration there is nothing to derive, so raw it is.
+        assertEquals("raw 8000 · 1min ago", potLine(Pot(name = "b", raw = 8000, readTs = 900), 1000))
+    }
+
+    @Test
     fun `the row note nags for a verdict and otherwise stays quiet`() {
         val judged = Pot(name = "basil", lastDose = dose(ackedTs = 1000))
         assertEquals("dose 2h ago, not judged yet", rowNote(judged, 1000 + 2 * 3600))

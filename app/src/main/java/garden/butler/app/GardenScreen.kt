@@ -106,7 +106,7 @@ private fun GardenList(
                 item { ProblemStrip(garden.problems) }
             }
             if (garden.health.controllers.isNotEmpty()) {
-                item { ControllersCard(garden.health, nowS, model::resetInterval) }
+                item { ControllersCard(garden.health, nowS, cachedAtS == null, model::resetInterval) }
             }
             if (listNote != null) {
                 item {
@@ -196,7 +196,7 @@ private fun ProblemStrip(problems: List<String>) {
 /** One line per controller; a leftover interval override (a wizard that
  * could not restore it) gets its reset here. */
 @Composable
-private fun ControllersCard(health: Health, nowS: Long, reset: (String) -> Unit) {
+private fun ControllersCard(health: Health, nowS: Long, live: Boolean, reset: (String) -> Unit) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             health.controllers.forEach { c ->
@@ -207,7 +207,11 @@ private fun ControllersCard(health: Health, nowS: Long, reset: (String) -> Unit)
                         style = MaterialTheme.typography.bodySmall,
                     )
                     if (hasOverride(c)) {
-                        AssistChip(onClick = { reset(c.controller) }, label = { Text("reset") })
+                        AssistChip(
+                            onClick = { reset(c.controller) },
+                            enabled = live,
+                            label = { Text("reset") },
+                        )
                     }
                 }
             }

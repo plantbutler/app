@@ -657,6 +657,47 @@ class GardenViewModelTest {
     }
 
     @Test
+    fun `off the tailnet the cache fills the Trouble screen the failed fetch left`() {
+        // The case the whole feature exists for: the network fails fast and
+        // usually beats the disk, so the cache has to be allowed to land on
+        // a Trouble screen or the app is blank exactly when it should not be.
+        butler.failPots = true
+        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        model = withCache(cache)
+        onMain { refresh() }
+        waitFor("the trouble") { model.state.value as? UiState.Trouble }
+        onMain { openCache() }
+        val shown = waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        assertEquals(butler.nowS - 7200, shown.cachedAtS)
+        assertEquals(listOf("basil"), shown.garden.pots.map { it.name })
+    }
+
+    @Test
+    fun `the reset chip is refused while the screen is a memory`() {
+        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        model = withCache(cache)
+        onMain { openCache() }
+        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        onMain { resetInterval("b1") }
+        val note = waitFor("the note") { model.listNote.value }
+        assertEquals(true, note.startsWith("the butler is not answering"))
+        assertEquals(emptyList(), butler.posts().toList())
+    }
+
+    @Test
+    fun `what goes to disk carries no derived percentage`() {
+        val cache = FakeCache()
+        model = withCache(cache)
+        ready()
+        val written = waitFor("the write") { cache.writes.lastOrNull() }
+        assertEquals(true, written.pots.isNotEmpty())
+        // The backend sent no pct for these pots, but the rule is what
+        // matters: nothing derived is stored, so nothing can be read back
+        // through a calibration it was not taken with.
+        assertEquals(emptyList(), written.pots.mapNotNull { it.pct })
+    }
+
+    @Test
     fun `a cache that arrives after a live answer does not replace it`() {
         val cache = FakeCache(CachedGarden(listOf(cachedPot("stale")), Health(), atS = butler.nowS - 7200))
         model = withCache(cache)
