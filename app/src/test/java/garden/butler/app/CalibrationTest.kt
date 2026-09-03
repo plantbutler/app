@@ -59,20 +59,40 @@ class CalibrationTest {
     }
 
     @Test
-    fun `two reports close together move the wizard to air`() {
+    fun `two reports close together move the wizard to air, and it starts empty`() {
         var s: CalState = calStart(7, 1000, 60)
         s = calStep(s, seen(8000, 1001), 1001)
         s = calStep(s, seen(8100, 1061), 1061)
         s = calStep(s, seen(8200, 1066), 1066)
+        // The reports that proved the board sped up are evidence about its
+        // pace, not about air — "hold it in the AIR" has not been shown yet.
+        // Air begins with nothing, from the newest of them.
         assertEquals(
-            CalState.Air(
-                prevNextS = 7,
-                freshS = FRESH_FAST_S,
-                since = 1000,
-                seen = listOf(Reading(8200, 1066, 1066), Reading(8100, 1061, 1061), Reading(8000, 1001, 1001)),
-            ),
+            CalState.Air(prevNextS = 7, freshS = FRESH_FAST_S, since = 1066, seen = emptyList()),
             s,
         )
+    }
+
+    @Test
+    fun `the dry endpoint cannot be taken from readings that predate the instruction`() {
+        // The regression the median introduced: the sensor is still in soil
+        // while the board proves it sped up, and those soil readings used to
+        // be carried into the air step. A dry calibrated against soil makes a
+        // wet pot read as parched, and the rules water it.
+        var s: CalState = calStart(null, 1000, 60)
+        s = calStep(s, seen(8000, 1010), 1010) // still in soil
+        s = calStep(s, seen(8100, 1015), 1015) // still in soil; the board obeyed
+        assertIs<CalState.Air>(s)
+        assertEquals(emptyList(), tapSamples(s))
+
+        s = calStep(s, seen(13000, 1020), 1020) // now actually in air
+        val water = calStep(s, CalEvent.Tap, 1022) as CalState.Water
+        assertEquals(13000, water.dry) // not 8100, which is soil
+
+        // What the old carry-over would have cost: a pot at raw 8500 reads
+        // half wet on a correct scale and bone dry on the contaminated one.
+        assertEquals(50, moisturePct(8500, 13000, 4000))
+        assertEquals(0, moisturePct(8500, 8100, 4000))
     }
 
     @Test

@@ -116,7 +116,14 @@ fun calStep(s: CalState, e: CalEvent, nowS: Long): CalState =
                 is CalEvent.Seen -> {
                     val seen = remember(s.seen, e, nowS)
                     if (obeyed(seen)) {
-                        CalState.Air(s.prevNextS, FRESH_FAST_S, s.startTs, seen)
+                        // Air starts empty, and starts from the newest report
+                        // that proved the board sped up. Those reports are
+                        // evidence about the board's pace, not about air: the
+                        // sensor was wherever it was, and "hold it in the AIR"
+                        // has not been shown yet. Folding them into the median
+                        // would calibrate dry against soil, and a pot whose
+                        // scale says it is dry gets watered.
+                        CalState.Air(s.prevNextS, FRESH_FAST_S, seen.first().readTs)
                     } else {
                         s.copy(seen = seen)
                     }
