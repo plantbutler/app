@@ -241,9 +241,19 @@ class Backend(private val baseUrl: String, private val token: String = "") {
 
     /** The watering history, newest first: one pot's, or the whole
      * garden's when `potId` is null. */
-    fun doses(potId: String?, limit: Int): DosesAnswer {
-        val pot = potId?.let { "pot=" + URLEncoder.encode(it, "UTF-8") + "&" } ?: ""
-        return parseDoses(get("/doses?${pot}limit=$limit"))
+    fun doses(potId: String?, limit: Int, after: Cursor? = null): DosesAnswer {
+        val query =
+            buildList {
+                potId?.let { add("pot=" + URLEncoder.encode(it, "UTF-8")) }
+                add("limit=$limit")
+                // Both halves, or the backend refuses: doses share a second,
+                // and a timestamp alone would skip or repeat them.
+                after?.let {
+                    add("before=${it.ts}")
+                    add("before_id=${it.id}")
+                }
+            }.joinToString("&")
+        return parseDoses(get("/doses?$query"))
     }
 
     /** Bucketed raw counts for one sensor over the last `hours`. The name is

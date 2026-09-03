@@ -9,6 +9,14 @@ package garden.butler.app
  * list is bounded rather than complete; the screen says so. */
 const val DOSES_LIMIT = 50
 
+/** Where a page of history ended: the whole sort key, which is what the
+ * backend's cursor wants. */
+data class Cursor(val ts: Long, val id: Long)
+
+/** The cursor for asking what comes before this row. Null for a dose with
+ * no time at all, which cannot be paged past. */
+fun doseCursor(dose: Dose): Cursor? = (dose.sentTs ?: dose.createdTs)?.let { Cursor(it, dose.id) }
+
 /** A dose the meter voted against: it counted less than half of what was
  * asked. The same rule the backend's dose alert uses (`2 * flow_ml < ml`),
  * deliberately — two thresholds for one symptom would disagree in public. */

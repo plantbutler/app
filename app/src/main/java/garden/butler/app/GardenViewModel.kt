@@ -42,9 +42,11 @@ sealed interface Screen {
         val saving: Boolean = false,
         val refused: String? = null,
         val note: String? = null,
-        /** The last 24 h of the stored sensor; stays up when a reload fails. */
+        /** The stored sensor's curve over `window`; stays up when a reload
+         * fails. */
         val history: History? = null,
         val historyWhy: String? = null,
+        val window: ChartWindow = ChartWindow.DAY,
         /** The water command this form queued, followed until its fate is known. */
         val watering: Issued? = null,
         val waterRefused: String? = null,
@@ -64,6 +66,10 @@ sealed interface Screen {
         val nowS: Long = 0,
         val loading: Boolean = true,
         val why: String? = null,
+        /** A full page came back, so there may be another behind it. The
+         * table is never pruned; this is how the older rows are reachable. */
+        val more: Boolean = false,
+        val loadingMore: Boolean = false,
     ) : Screen
 }
 
@@ -204,7 +210,7 @@ class GardenViewModel(
                 try {
                     val history =
                         withContext(Dispatchers.IO) {
-                            backend.history(controller, channel, HISTORY_HOURS, HISTORY_BUCKET_S)
+                            backend.history(controller, channel, form.window.hours, form.window.bucketS)
                         }
                     onPot(form) { it.copy(history = history, historyWhy = null) }
                 } catch (why: CancellationException) {
@@ -214,6 +220,18 @@ class GardenViewModel(
                     onPot(form) { it.copy(historyWhy = "chart: " + (why.message ?: why.toString())) }
                 }
             }
+    }
+
+    /** Day, week or month on the open form's chart. The curve is dropped
+     * rather than kept while the new one loads: a month's shape drawn under
+     * a "day" chip is a lie, and the spinner is one refresh long. */
+    fun setChartWindow(window: ChartWindow) {
+        val form = shown.value as? Screen.Pot ?: return
+        if (form.window == window) return
+        val pot = form.id?.let { currentPot(it) } ?: return
+        val next = form.copy(window = window, history = null, historyWhy = null)
+        shown.value = next
+        loadHistory(next, pot)
     }
 
     private fun controllerOf(name: String?): ControllerHealth? =
@@ -318,17 +336,20 @@ class GardenViewModel(
 
     /** Single-flight, like the chart's loader: two quick pulls must not
      * race, or the slower answer lands last and quietly replaces the
-     * fresher list with an older one. */
+     * fresher list with an older one. The flight is shared with the pager,
+     * so a reload also cancels a page that is on its way. */
     private fun loadDoses(screen: Screen.Doses) {
-        shown.value = screen
         dosesFlight?.cancel()
+        val fresh = screen.copy(loadingMore = false)
+        shown.value = fresh
         dosesFlight =
             viewModelScope.launch {
                 try {
-                    val answer = withContext(Dispatchers.IO) { backend.doses(screen.potId, DOSES_LIMIT) }
-                    onDoses(screen) {
+                    val answer = withContext(Dispatchers.IO) { backend.doses(fresh.potId, DOSES_LIMIT) }
+                    onDoses(fresh) {
                         it.copy(
                             doses = answer.doses,
+                            more = answer.doses.size >= DOSES_LIMIT,
                             // A backend that sends no clock would otherwise
                             // date every row to the epoch and render the lot
                             // as "0s ago" — a confident wrong answer. The
@@ -343,7 +364,39 @@ class GardenViewModel(
                 } catch (why: Exception) {
                     ensureActive()
                     // The list already up stays up: a failed reload is weather.
-                    onDoses(screen) { it.copy(loading = false, why = why.message ?: why.toString()) }
+                    onDoses(fresh) { it.copy(loading = false, why = why.message ?: why.toString()) }
+                }
+            }
+    }
+
+    /** The page before the oldest row on screen. Appended, never replacing:
+     * the rows already read do not move under the finger. */
+    fun loadOlderDoses() {
+        val screen = shown.value as? Screen.Doses ?: return
+        // Not over a reload: its cursor would be anchored to a list that is
+        // about to be replaced, and the row on the old boundary would be
+        // stepped over and never asked for again.
+        if (screen.loading || screen.loadingMore || !screen.more) return
+        val cursor = screen.doses?.lastOrNull()?.let(::doseCursor) ?: return
+        dosesFlight?.cancel()
+        val asking = screen.copy(loadingMore = true, why = null)
+        shown.value = asking
+        dosesFlight =
+            viewModelScope.launch {
+                try {
+                    val answer = withContext(Dispatchers.IO) { backend.doses(asking.potId, DOSES_LIMIT, cursor) }
+                    onDoses(asking) {
+                        it.copy(
+                            doses = (it.doses ?: emptyList()) + answer.doses,
+                            more = answer.doses.size >= DOSES_LIMIT,
+                            loadingMore = false,
+                        )
+                    }
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    ensureActive()
+                    onDoses(asking) { it.copy(loadingMore = false, why = why.message ?: why.toString()) }
                 }
             }
     }

@@ -15,6 +15,20 @@ import kotlin.math.floor
 const val HISTORY_HOURS = 24
 const val HISTORY_BUCKET_S = 300
 
+/** How far back the chart looks, and how coarsely. The bucket is chosen to
+ * keep the point count near a day's 288 whatever the span: a month at
+ * five-minute buckets would be 8640 points on a phone-width canvas, most of
+ * them thinner than a pixel, and the backend refuses over 2016 anyway. */
+enum class ChartWindow(val hours: Int, val bucketS: Int, val label: String) {
+    DAY(24, HISTORY_BUCKET_S, "day"),
+    WEEK(24 * 7, 1800, "week"),
+    MONTH(24 * 30, 3600, "month"),
+    ;
+
+    val points: Int
+        get() = hours * 3600 / bucketS
+}
+
 data class Sample(val ts: Long, val value: Double)
 
 fun isCalibrated(dryRaw: Long?, wetRaw: Long?): Boolean =
@@ -114,12 +128,57 @@ fun timeTicks(since: Long, to: Long, zone: ZoneId, stepH: Int = 6): List<TimeTic
         .toList()
 }
 
+/** Midnights every `stepDays`, labelled by date: an hour of the clock means
+ * nothing across a week, and 28 "00:00" labels mean less than nothing. */
+fun dayTicks(since: Long, to: Long, zone: ZoneId, stepDays: Int): List<TimeTick> {
+    val firstDay = Instant.ofEpochSecond(since).atZone(zone).toLocalDate()
+    val lastDay = Instant.ofEpochSecond(to).atZone(zone).toLocalDate()
+    val dm = DateTimeFormatter.ofPattern("d MMM")
+    return generateSequence(firstDay) { it.plusDays(stepDays.toLong()) }
+        .takeWhile { it <= lastDay }
+        .map { ZonedDateTime.of(it, LocalTime.MIDNIGHT, zone) }
+        .filter { it.toEpochSecond() in since until to }
+        .distinctBy { it.toEpochSecond() }
+        .map { TimeTick(it.toEpochSecond(), dm.format(it)) }
+        .toList()
+}
+
+/** The gridlines for a window: hours across a day, dates across a week or a
+ * month. Same shape either way, so the canvas does not care which it got. */
+fun windowTicks(window: ChartWindow, since: Long, to: Long, zone: ZoneId): List<TimeTick> =
+    when (window) {
+        ChartWindow.DAY -> timeTicks(since, to, zone)
+        ChartWindow.WEEK -> dayTicks(since, to, zone, stepDays = 1)
+        ChartWindow.MONTH -> dayTicks(since, to, zone, stepDays = 5)
+    }
+
+/** What the finger is on: the sample nearest the touched fraction of the
+ * width, and null when the chart has no points to be near. The fraction,
+ * not a pixel, so this stays a pure decision the tests can make. */
+fun scrubbed(series: List<List<Sample>>, fraction: Double, since: Long, to: Long): Sample? {
+    val samples = series.flatten()
+    if (samples.isEmpty()) return null
+    val at = since + (to - since) * fraction.coerceIn(0.0, 1.0)
+    return samples.minByOrNull { kotlin.math.abs(it.ts - at) }
+}
+
+/** The readout under the finger: "48% · Tue 14:35", or raw counts when the
+ * pot is not calibrated. The time is the sample's own, not the finger's —
+ * pointing between two readings must not invent a third. */
+fun scrubLabel(sample: Sample, calibrated: Boolean, zone: ZoneId): String {
+    val value = if (calibrated) "${sample.value.toInt()}%" else "raw ${sample.value.toLong()}"
+    val at = Instant.ofEpochSecond(sample.ts).atZone(zone)
+    return "$value · " + DateTimeFormatter.ofPattern("EEE d MMM HH:mm").format(at)
+}
+
 /** "24 h · 5-min buckets, 1421 readings · % from dry 12000 / wet 4000": what
  * the curve is made of, and whose calibration reads it. An `env` pot's raw
  * counts are not asked to be calibrated: a thermometer never is. */
 fun chartCaption(history: History, dryRaw: Long?, wetRaw: Long?, env: Boolean = false): String {
     val hours = ((history.to - history.since) / 3600).takeIf { it > 0 } ?: HISTORY_HOURS.toLong()
-    if (history.points.isEmpty()) return "no readings in the last $hours h"
+    // Past a couple of days "720 h" stops being a span anyone pictures.
+    val span = if (hours >= 48) "${hours / 24} d" else "$hours h"
+    if (history.points.isEmpty()) return "no readings in the last $span"
     val bucket =
         if (history.bucketS % 3600 == 0) "${history.bucketS / 3600}-h" else "${history.bucketS / 60}-min"
     val readings = history.points.sumOf { it.n }
@@ -129,5 +188,5 @@ fun chartCaption(history: History, dryRaw: Long?, wetRaw: Long?, env: Boolean = 
             env -> "raw counts"
             else -> "raw counts — calibrate to read %"
         }
-    return "$hours h · $bucket buckets, $readings readings · $scale"
+    return "$span · $bucket buckets, $readings readings · $scale"
 }

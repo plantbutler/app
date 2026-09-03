@@ -139,7 +139,16 @@ class ChartTest {
     @Test
     fun `hour buckets and other windows read from the answer`() {
         val h = history(3600, 168, point(0, 8000, n = 60))
-        assertEquals("168 h · 1-h buckets, 60 readings · raw counts — calibrate to read %", chartCaption(h, null, null))
+        // Past a couple of days the span reads in days: "168 h" is a number
+        // nobody pictures as a week.
+        assertEquals("7 d · 1-h buckets, 60 readings · raw counts — calibrate to read %", chartCaption(h, null, null))
+        val month = history(3600, 720, point(0, 8000, n = 60))
+        assertEquals("30 d · 1-h buckets, 60 readings · raw counts — calibrate to read %", chartCaption(month, null, null))
+        // A day and just under two are still hours.
+        assertEquals("24 h · 5-min buckets, 1 readings · raw counts — calibrate to read %",
+            chartCaption(history(300, 24, point(0, 8000)), null, null))
+        assertEquals("47 h · 5-min buckets, 1 readings · raw counts — calibrate to read %",
+            chartCaption(history(300, 47, point(0, 8000)), null, null))
     }
 
     @Test
@@ -220,5 +229,67 @@ class ChartTest {
     fun `an empty window has no marks, even on one`() {
         assertEquals(emptyList(), timeTicks(at(6, 10, 12), at(6, 10, 12), zurich))
         assertEquals(emptyList(), timeTicks(at(6, 10, 12, 30), at(6, 10, 12, 30), zurich))
+    }
+}
+
+class ChartWindowTest {
+    private val zone = ZoneId.of("Europe/Zurich")
+
+    @Test
+    fun `every window stays near a day's point count and inside the backend's cap`() {
+        // The backend refuses more than 2016 buckets; a phone-width canvas
+        // cannot draw many more than a few hundred either way.
+        for (w in ChartWindow.entries) {
+            assertTrue(w.points in 200..800, "${w.label} asks for ${w.points} points")
+            assertTrue(w.hours * 3600 / w.bucketS <= 2016)
+        }
+        assertEquals(288, ChartWindow.DAY.points)
+    }
+
+    @Test
+    fun `a day is labelled by the clock and longer windows by the date`() {
+        val day = ZonedDateTime.of(2026, 9, 1, 0, 0, 0, 0, zone).toEpochSecond()
+        val dayTicks = windowTicks(ChartWindow.DAY, day, day + 24 * 3600, zone)
+        assertEquals(listOf("00:00", "06:00", "12:00", "18:00"), dayTicks.map { it.label })
+
+        val week = windowTicks(ChartWindow.WEEK, day, day + 7 * 24 * 3600, zone)
+        assertEquals(7, week.size)
+        assertEquals("1 Sep", week.first().label)
+        assertEquals("7 Sep", week.last().label)
+
+        val month = windowTicks(ChartWindow.MONTH, day, day + 30 * 24 * 3600, zone)
+        assertEquals(listOf("1 Sep", "6 Sep", "11 Sep", "16 Sep", "21 Sep", "26 Sep"), month.map { it.label })
+    }
+
+    @Test
+    fun `the gap that breaks the line scales with the bucket`() {
+        // The rabbit hole: a threshold written for a day's 5-min buckets
+        // would swallow a whole outage inside one hourly bucket.
+        val board = ControllerHealth("b1", nextS = 60)
+        assertEquals(600L, chartGapS(ChartWindow.DAY.bucketS, board, 60))
+        assertEquals(3600L, chartGapS(ChartWindow.WEEK.bucketS, board, 60))
+        assertEquals(7200L, chartGapS(ChartWindow.MONTH.bucketS, board, 60))
+    }
+
+    @Test
+    fun `the scrub lands on the nearest real sample, never between two`() {
+        val series = listOf(listOf(Sample(1000, 40.0), Sample(2000, 50.0), Sample(3000, 60.0)))
+        assertEquals(Sample(1000, 40.0), scrubbed(series, 0.0, 1000, 3000))
+        assertEquals(Sample(3000, 60.0), scrubbed(series, 1.0, 1000, 3000))
+        assertEquals(Sample(2000, 50.0), scrubbed(series, 0.5, 1000, 3000))
+        // Just past the midpoint is still the nearer of the two, not a mean.
+        assertEquals(Sample(2000, 50.0), scrubbed(series, 0.6, 1000, 3000))
+        // Off the ends clamps rather than returning nothing.
+        assertEquals(Sample(1000, 40.0), scrubbed(series, -2.0, 1000, 3000))
+        assertEquals(Sample(3000, 60.0), scrubbed(series, 9.0, 1000, 3000))
+        assertNull(scrubbed(emptyList(), 0.5, 1000, 3000))
+        assertNull(scrubbed(listOf(emptyList()), 0.5, 1000, 3000))
+    }
+
+    @Test
+    fun `the scrub reads out the sample's own time, and its own scale`() {
+        val ts = ZonedDateTime.of(2026, 9, 1, 14, 35, 0, 0, zone).toEpochSecond()
+        assertEquals("48% · Tue 1 Sep 14:35", scrubLabel(Sample(ts, 48.0), calibrated = true, zone))
+        assertEquals("raw 8123 · Tue 1 Sep 14:35", scrubLabel(Sample(ts, 8123.0), calibrated = false, zone))
     }
 }
