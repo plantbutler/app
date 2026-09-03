@@ -70,6 +70,11 @@ Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, themi
   epoch-aligned buckets, the server's `since`/`to` as the axis); % is derived here from the
   pot's current calibration, so a recalibration re-reads the whole curve. Calibrated pots
   plot 0–100 % with a translucent band between the targets; uncalibrated ones plot raw.
+- `Doses.kt` — the watering history as words: `doseHistoryLine`, `doseTrouble` (the row worth a
+  second look — expired, failed, or the meter counting less than half, which is the backend's own
+  `2 * flow_ml < ml` rather than a second threshold that could disagree with it in public),
+  `doseWho` (an unattributable dose says so rather than borrowing the name of whoever hangs on
+  that hose now), `doseSource`, `DOSES_LIMIT`.
 - `Water.kt` — the water-now button as pure decisions: `cannotWater` (disabled pot, no
   mapping, no dose, an unsaved controller/outlet/dose edit, a silent board, a busy slot, a
   proposal waiting — in that order), `waterStatus` from `/pots` `last_dose` and `/health`'s
@@ -78,6 +83,10 @@ Not in v1: login, offline mode, Play Store, push via FCM, widgets, photos, themi
   controllers card"), `stillFollowing` (a 15 s refresh only while the fate is open, only
   while RESUMED, measured on the phone clock), `waterDialogText` (the one confirmation:
   counts as today's watering for the rules; NAS or board down means no water).
+- `DosesScreen.kt` — the watering history, one pot's or the garden's, over the form it was
+  opened from so Back gives a half-typed edit back. The rows that went wrong carry their own
+  line in the error colour instead of being filtered out, and the list says it is the last N
+  rather than everything, since the commands table is never pruned.
 - `Main.kt` — `App()`: one `when` over `Screen`, the 60 s refresh loop (paused while the
   wizard polls every 2 s), the BackHandler for the wizard. `GardenScreen.kt`, `PotScreen.kt`
   (hero line, the chart, the water row, proposal card, dose card with verdict chips, discard
@@ -100,7 +109,10 @@ chart. A manual dose bypasses cooldown, daily cap, quiet hours and the float/pos
 (decision #5: the firmware protects) and then counts toward the rules' cooldown and cap;
 it lands in the dose card and asks for a verdict like any other. The real board does not
 execute commands until "Pump on command": the water row is verified against the fake board.
-No watering history and no touch on the chart, per the pitch.
+No touch on the chart, per the pitch. The history list is bounded at
+`DOSES_LIMIT` and the app does not page: `/doses` takes a `before=`/`before_id=` cursor, but no
+screen uses it yet, so older doses are on the butler and not reachable from the phone. The screen
+says so rather than looking complete.
 
 **2026-09-03.** A pot is a `pot-xxxxxx` id, not a name (backend 0.8.0, decision #16). Every
 screen keys on it: `Screen.Pot.id`, the list's `key`, the wizard's poll. The nickname is

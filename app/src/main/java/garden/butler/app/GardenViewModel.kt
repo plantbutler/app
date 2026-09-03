@@ -51,6 +51,20 @@ sealed interface Screen {
     ) : Screen
 
     data class Calibrate(val parent: Pot, val cal: CalState) : Screen
+
+    /** The watering history, over the form it was opened from — `parent`
+     * null means it was opened from the list and covers the whole garden.
+     * `nowS` is the server's own clock from the answer, so "3h ago" is not
+     * the phone's opinion of a backend timestamp. */
+    data class Doses(
+        val parent: Pot?,
+        val potId: String?,
+        val title: String,
+        val doses: kotlin.collections.List<Dose>? = null, // Screen.List shadows the plain one here
+        val nowS: Long = 0,
+        val loading: Boolean = true,
+        val why: String? = null,
+    ) : Screen
 }
 
 const val CALIBRATION_SAVED_NOTE =
@@ -74,6 +88,7 @@ class GardenViewModel(
     private var fetching: Job? = null
     private var refreshAgain = false
     private var historyFlight: Job? = null
+    private var dosesFlight: Job? = null
 
     private val shown = MutableStateFlow<Screen>(Screen.List)
     val screen: StateFlow<Screen> = shown
@@ -271,11 +286,72 @@ class GardenViewModel(
         onPot { it.copy(draft = it.draft + (key to value), refused = null, waterRefused = null) }
 
     fun back() {
-        when (shown.value) {
+        when (val here = shown.value) {
             is Screen.Calibrate -> calEvent(CalEvent.Cancel)
+            // Back to the form it was opened over, with its draft intact:
+            // reading the history is not a reason to lose an edit.
+            is Screen.Doses -> shown.value = here.parent ?: Screen.List
             is Screen.Pot -> shown.value = Screen.List
             Screen.List -> Unit
         }
+    }
+
+    /** The watering history: one pot's, or the whole garden's from the
+     * list. The rows come from the backend already attributed, so nothing
+     * here has to guess whose dose was whose. */
+    fun openDoses(potId: String?, title: String) {
+        val parent = shown.value as? Screen.Pot
+        // Not while the form has something on the wire. Back restores this
+        // very snapshot, so leaving mid-save would bring back a form stuck
+        // on saving = true — its Save and Water greyed out for good, since
+        // the outcome lands on whatever form is shown and this one is not.
+        // Worse over the wizard's arming POST: the board would be left
+        // reporting every 5 s with no wizard on screen to restore it.
+        if (parent?.saving == true) return
+        val screen = Screen.Doses(parent, potId, title)
+        noteOnList.value = null
+        shown.value = screen
+        loadDoses(screen)
+    }
+
+    fun reloadDoses() = (shown.value as? Screen.Doses)?.let { loadDoses(it.copy(loading = true, why = null)) }
+
+    /** Single-flight, like the chart's loader: two quick pulls must not
+     * race, or the slower answer lands last and quietly replaces the
+     * fresher list with an older one. */
+    private fun loadDoses(screen: Screen.Doses) {
+        shown.value = screen
+        dosesFlight?.cancel()
+        dosesFlight =
+            viewModelScope.launch {
+                try {
+                    val answer = withContext(Dispatchers.IO) { backend.doses(screen.potId, DOSES_LIMIT) }
+                    onDoses(screen) {
+                        it.copy(
+                            doses = answer.doses,
+                            // A backend that sends no clock would otherwise
+                            // date every row to the epoch and render the lot
+                            // as "0s ago" — a confident wrong answer. The
+                            // phone's own clock is the honest fallback.
+                            nowS = if (answer.now > 0) answer.now else phoneS(),
+                            loading = false,
+                            why = null,
+                        )
+                    }
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    ensureActive()
+                    // The list already up stays up: a failed reload is weather.
+                    onDoses(screen) { it.copy(loading = false, why = why.message ?: why.toString()) }
+                }
+            }
+    }
+
+    /** An answer lands only on the history it was asked for: the user may
+     * have moved on to another pot's, or back to the garden's. */
+    private inline fun onDoses(of: Screen.Doses, change: (Screen.Doses) -> Screen.Doses) {
+        shown.update { if (it is Screen.Doses && it.potId == of.potId && it.parent?.id == of.parent?.id) change(it) else it }
     }
 
     fun save() {

@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Three screens, one `when`: a navigation library would be the pitch's
+/** Four screens, one `when`: a navigation library would be the pitch's
  * architecture rabbit hole. The pot form owns its own back handling (it
  * has a discard dialog to ask first). The minute refresh lives here, not
  * on the list, so the form's readings tick too; the wizard polls on its
@@ -52,5 +52,6 @@ fun App(model: GardenViewModel) {
         Screen.List -> GardenScreen(model)
         is Screen.Pot -> PotScreen(model, it)
         is Screen.Calibrate -> CalibrateScreen(model, it)
+        is Screen.Doses -> DosesScreen(model, it)
     }
 }

@@ -3,6 +3,7 @@ package garden.butler.app
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 
@@ -89,6 +90,42 @@ class BackendWireTest {
             assertEquals("/pots", sent.path)
             assertEquals(listOf("basil"), pots.map { it.name })
             assertEquals(48, pots[0].pct)
+        }
+
+    @Test
+    fun `doses come back through a real GET, per pot and for the garden`() =
+        withServer { server, backend ->
+            server.enqueue(
+                MockResponse().setBody(
+                    """{"now": 500, "doses": [
+                         {"id": 7, "kind": "water", "ml": 100, "cap_s": 30, "flow_ml": 12,
+                          "state": "acked", "source": "manual", "created_ts": 90,
+                          "sent_ts": 100, "acked_ts": 110, "verdict": "too_little",
+                          "pot": "pot-1", "pot_name": "basil"},
+                         {"id": 6, "state": "expired", "pot": null, "pot_name": null}
+                       ]}""",
+                ),
+            )
+            val answer = backend.doses("pot-1", 50)
+            val sent = server.takeRequest()
+            assertEquals("GET", sent.method)
+            assertEquals("/doses?pot=pot-1&limit=50", sent.path)
+            assertEquals(500, answer.now)
+            assertEquals(listOf(7L, 6L), answer.doses.map { it.id })
+            assertEquals(12, answer.doses[0].flowMl)
+            assertEquals("too_little", answer.doses[0].verdict)
+            assertEquals("basil", answer.doses[0].potName)
+            // The unattributable row decodes as itself, not as a failure.
+            assertNull(answer.doses[1].pot)
+            assertEquals("expired", answer.doses[1].state)
+        }
+
+    @Test
+    fun `the garden's history asks for no pot at all`() =
+        withServer { server, backend ->
+            server.enqueue(MockResponse().setBody("""{"now": 1, "doses": []}"""))
+            backend.doses(null, 25)
+            assertEquals("/doses?limit=25", server.takeRequest().path)
         }
 
     @Test

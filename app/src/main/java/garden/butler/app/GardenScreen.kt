@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -47,6 +48,9 @@ fun GardenScreen(model: GardenViewModel) {
             TopAppBar(
                 title = { Text("Plant Butler") },
                 actions = {
+                    IconButton(onClick = { model.openDoses(null, "Watering") }) {
+                        Icon(Icons.AutoMirrored.Filled.List, "Watering history")
+                    }
                     IconButton(onClick = model::newPot) { Icon(Icons.Default.Add, "New pot") }
                 },
             )

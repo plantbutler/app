@@ -71,6 +71,35 @@ data class Pot(
     @SerialName("last_dose") val lastDose: LastDose? = null,
 )
 
+/** One row of the watering history: what was asked, what the meter
+ * counted, how it ended, and whose it was. `pot` is null for a dose no
+ * mapping window claims — handed out on a hose no pot held, or never
+ * handed out at all. */
+@Serializable
+data class Dose(
+    val id: Long,
+    val kind: String = "water",
+    val ml: Int? = null,
+    @SerialName("cap_s") val capS: Int? = null,
+    @SerialName("flow_ml") val flowMl: Int? = null,
+    val state: String = "sent",
+    val source: String? = null,
+    @SerialName("created_ts") val createdTs: Long? = null,
+    @SerialName("sent_ts") val sentTs: Long? = null,
+    @SerialName("acked_ts") val ackedTs: Long? = null,
+    val verdict: String? = null,
+    val pot: String? = null,
+    @SerialName("pot_name") val potName: String? = null,
+)
+
+@Serializable
+data class DosesAnswer(
+    val doses: List<Dose> = emptyList(),
+    /** The server's clock when it answered, so "3h ago" is not the phone's
+     * opinion of a backend timestamp. */
+    val now: Long = 0,
+)
+
 @Serializable
 data class PotsAnswer(
     val pots: List<Pot> = emptyList(),
@@ -145,6 +174,8 @@ fun parseCmdAnswer(answer: String): Long? =
 
 fun parsePots(body: String): List<Pot> = json.decodeFromString<PotsAnswer>(body).pots
 
+fun parseDoses(body: String): DosesAnswer = json.decodeFromString(body)
+
 fun parseHealth(body: String): Health = json.decodeFromString(body)
 
 /** The backend said no, in its own words: "refused: …", "busy: cmd=3
@@ -207,6 +238,13 @@ class Backend(private val baseUrl: String, private val token: String = "") {
 
     fun verdict(cmdId: Long, verdict: String): String =
         post("/verdict", "cmd=$cmdId verdict=$verdict")
+
+    /** The watering history, newest first: one pot's, or the whole
+     * garden's when `potId` is null. */
+    fun doses(potId: String?, limit: Int): DosesAnswer {
+        val pot = potId?.let { "pot=" + URLEncoder.encode(it, "UTF-8") + "&" } ?: ""
+        return parseDoses(get("/doses?${pot}limit=$limit"))
+    }
 
     /** Bucketed raw counts for one sensor over the last `hours`. The name is
      * a single token on the wire but not necessarily a URL-safe one. */
