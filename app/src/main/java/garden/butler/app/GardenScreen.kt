@@ -63,7 +63,7 @@ fun GardenScreen(model: GardenViewModel) {
                 is UiState.Trouble ->
                     Trouble(it, model::refresh, Modifier.align(Alignment.Center))
                 is UiState.Ready ->
-                    GardenList(it.garden, it.refreshing, it.why, listNote, model)
+                    GardenList(it.garden, it.refreshing, it.why, it.cachedAtS, listNote, model)
             }
         }
     }
@@ -88,13 +88,18 @@ private fun GardenList(
     garden: Garden,
     refreshing: Boolean,
     why: String?,
+    cachedAtS: Long?,
     listNote: String?,
     model: GardenViewModel,
 ) {
     val nowS = System.currentTimeMillis() / 1000
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = model::refresh) {
         LazyColumn(Modifier.fillMaxSize()) {
-            if (why != null) {
+            // The age has to be as loud as the numbers it qualifies: a
+            // stale reading shown without it is worse than showing nothing.
+            if (cachedAtS != null) {
+                item { CachedBanner(staleLine(cachedAtS, nowS)) }
+            } else if (why != null) {
                 item { StaleBanner(why) }
             }
             if (garden.problems.isNotEmpty()) {
@@ -138,6 +143,19 @@ private fun GardenList(
                 }
             }
         }
+    }
+}
+
+/** Nothing on this screen came from the butler this launch. Loud on
+ * purpose, in the error colour and above everything, because every number
+ * underneath it is a memory. */
+@Composable
+private fun CachedBanner(line: String) {
+    Card(
+        Modifier.fillMaxWidth().padding(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Text(line, Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall)
     }
 }
 

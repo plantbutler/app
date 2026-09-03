@@ -16,6 +16,10 @@ data class Garden(
     val health: Health,
 )
 
+/** Every pot the answer carried, in one list again: what the cache stores,
+ * since splitting is a screen decision and a cache holds the answer. */
+fun Garden.all(): List<Pot> = pots + env + disabled
+
 /** The pot as the last good read has it; null once it vanished, in which
  * case the open form keeps rendering from its own snapshot. Every screen
  * keys on the id, so a rename moves a nickname and not a pot. */

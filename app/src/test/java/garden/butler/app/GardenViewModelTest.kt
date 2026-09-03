@@ -156,6 +156,19 @@ class GardenViewModelTest {
         fun posts() = requests.filter { it.method == "POST" }
     }
 
+    /** A cache in memory: the file one has its own test, and this keeps the
+     * view model's tests about what it does with a hit, not about disk. */
+    private class FakeCache(var held: CachedGarden? = null) : GardenCache {
+        val writes = CopyOnWriteArrayList<CachedGarden>()
+
+        override fun read(): CachedGarden? = held
+
+        override fun write(cached: CachedGarden) {
+            writes += cached
+            held = cached
+        }
+    }
+
     private val main = newSingleThreadContext("main")
     private val server = MockWebServer()
     private val butler = Butler()
@@ -609,6 +622,87 @@ class GardenViewModelTest {
         val after = waitFor("the reason") { (model.screen.value as? Screen.Doses)?.takeIf { it.why != null } }
         assertEquals("try again: x", after.why)
         assertEquals(before.doses?.map { it.id }, after.doses?.map { it.id })
+    }
+
+    private fun cachedPot(name: String = "basil") =
+        Pot(id = "pot-1", name = name, controller = "b1", channel = 0, outlet = 3, doseMl = 100, raw = 9000)
+
+    private fun withCache(cache: FakeCache): GardenViewModel =
+        GardenViewModel(Backend(server.url("/").toString(), token = "s3cret"), cache = cache)
+
+    @Test
+    fun `the cache fills the screen at launch, stamped with its age`() {
+        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        model = withCache(cache)
+        onMain { openCache() }
+        val shown = waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        assertEquals(butler.nowS - 7200, shown.cachedAtS)
+        assertEquals(listOf("basil"), shown.garden.pots.map { it.name })
+        // Nothing was asked of the butler to get this on screen.
+        assertEquals(emptyList(), butler.requests.toList())
+    }
+
+    @Test
+    fun `a live answer clears the stamp and is written back to the cache`() {
+        val cache = FakeCache(CachedGarden(listOf(cachedPot("stale")), Health(), atS = butler.nowS - 7200))
+        model = withCache(cache)
+        onMain { openCache() }
+        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        onMain { refresh() }
+        val live = waitFor("the live garden") { (model.state.value as? UiState.Ready)?.takeIf { it.cachedAtS == null } }
+        assertEquals(listOf("basil", "mint"), live.garden.pots.map { it.name })
+        val written = cache.writes.last()
+        assertEquals(listOf("pot-1", "pot-2"), written.pots.map { it.id })
+        assertEquals(true, written.atS >= butler.nowS)
+    }
+
+    @Test
+    fun `a cache that arrives after a live answer does not replace it`() {
+        val cache = FakeCache(CachedGarden(listOf(cachedPot("stale")), Health(), atS = butler.nowS - 7200))
+        model = withCache(cache)
+        ready()
+        onMain { openCache() }
+        Thread.sleep(200)
+        val state = model.state.value as UiState.Ready
+        assertNull(state.cachedAtS)
+        assertEquals(listOf("basil", "mint"), state.garden.pots.map { it.name })
+    }
+
+    @Test
+    fun `nothing is written to the butler while the screen is a memory`() {
+        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        model = withCache(cache)
+        onMain { openCache() }
+        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        onMain { open("pot-1") }
+        val form = pot()
+
+        onMain { water() }
+        val refusedWater = waitFor("the water refusal") {
+            (model.screen.value as? Screen.Pot)?.takeIf { it.waterRefused != null }
+        }
+        assertEquals(true, refusedWater.waterRefused!!.startsWith("the butler is not answering"))
+        assertEquals(true, "2h ago" in refusedWater.waterRefused!!)
+
+        onMain {
+            edit("target_low_pct", "35")
+            save()
+        }
+        val refusedSave = waitFor("the save refusal") {
+            (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null }
+        }
+        assertEquals(true, refusedSave.refused!!.startsWith("the butler is not answering"))
+
+        onMain { startCalibration() }
+        waitFor("the wizard refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.note != null } }
+
+        onMain { approve(9) }
+        onMain { verdict(9, "ok") }
+        Thread.sleep(200)
+        // Not one POST left the phone, and no dose was queued for later:
+        // this is a cache, not offline editing.
+        assertEquals(emptyList(), butler.posts().toList())
+        assertEquals(form.id, (model.screen.value as Screen.Pot).id)
     }
 
     @Test

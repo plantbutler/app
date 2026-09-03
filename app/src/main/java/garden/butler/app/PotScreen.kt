@@ -70,6 +70,7 @@ private val VERDICTS = listOf("ok", "too_much", "too_little")
 fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     val state by model.state.collectAsStateWithLifecycle()
     val garden = (state as? UiState.Ready)?.garden
+    val cachedAtS = (state as? UiState.Ready)?.cachedAtS
     val pot = screen.id?.let { garden?.potById(it) }
     // The title follows the pot, not the key: a rename lands here on the
     // next refresh. A pot that vanished keeps the name the form opened on.
@@ -116,6 +117,13 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            cachedAtS?.let {
+                Text(
+                    staleLine(it, nowS),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
             if (pot != null) Text(potLine(pot, nowS), style = MaterialTheme.typography.headlineSmall)
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
@@ -132,7 +140,12 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             }
             if (pot != null && !pot.name.startsWith(ENV_PREFIX)) {
                 val dirtyKeys = changedFields(screen.original, screen.draft).keys + emptied.map { it.key }
-                WaterRow(screen, pot, cannotWater(pot, board, nowS, health?.nextDefault ?: 60, dirtyKeys), model)
+                WaterRow(
+                    screen,
+                    pot,
+                    cannotWater(pot, board, nowS, health?.nextDefault ?: 60, dirtyKeys, cachedAtS),
+                    model,
+                )
             }
             if (pot?.enabled == 1) { // a disabled pot is neither proposed for nor dosed
                 pot.proposal?.let { ProposalCard(it, nowS) { model.approve(it.id) } }
