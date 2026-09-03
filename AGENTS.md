@@ -110,7 +110,9 @@ chart. A manual dose bypasses cooldown, daily cap, quiet hours and the float/pos
 it lands in the dose card and asks for a verdict like any other. The real board does not
 execute commands until "Pump on command": the water row is verified against the fake board.
 No touch on the chart, per the pitch. The history list is bounded at
-`DOSES_LIMIT` with no paging: older doses are on the butler and not reachable from the phone.
+`DOSES_LIMIT` and the app does not page: `/doses` takes a `before=`/`before_id=` cursor, but no
+screen uses it yet, so older doses are on the butler and not reachable from the phone. The screen
+says so rather than looking complete.
 
 **2026-09-03.** A pot is a `pot-xxxxxx` id, not a name (backend 0.8.0, decision #16). Every
 screen keys on it: `Screen.Pot.id`, the list's `key`, the wizard's poll. The nickname is

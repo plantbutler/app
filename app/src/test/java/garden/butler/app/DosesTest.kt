@@ -72,7 +72,9 @@ class DosesTest {
             ),
         )
         assertEquals("? ml · 2h ago · acked", doseHistoryLine(dose(ml = null, ackedTs = 1000), 1000 + 2 * 3600))
-        // A stop is not a dose and does not pretend to have millilitres.
+        // The backend filters stops out of /doses, so this is defence for a
+        // field the wire still carries rather than a row the app will meet:
+        // if one ever arrives it names itself instead of posing as 0 ml.
         assertEquals("stop · 2h ago · acked", doseHistoryLine(dose(kind = "stop", ackedTs = 1000), 1000 + 2 * 3600))
     }
 
