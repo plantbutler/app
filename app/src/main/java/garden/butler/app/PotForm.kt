@@ -112,13 +112,22 @@ fun renamed(original: Map<String, String>, draft: Map<String, String>): Boolean 
     return name.isNotEmpty() && name != original["name"]
 }
 
-/** The POST /pot body. An id makes it an edit, and the name rides along:
- * that is how a rename travels. No id makes it a create, and the backend
- * mints the id. The changed keys follow in POT_FIELDS order. */
-fun potBody(id: String?, name: String, changed: Map<String, String>): String =
+/** Everything the form would post, in one question: is there anything to
+ * save? A rename is not a POT_FIELDS key, so it needs asking separately. */
+fun formDirty(original: Map<String, String>, draft: Map<String, String>): Boolean =
+    changedFields(original, draft).isNotEmpty() ||
+        emptiedFields(original, draft).isNotEmpty() ||
+        renamed(original, draft)
+
+/** The POST /pot body. An id makes it an edit; `name` is sent only when it
+ * is the edit — a nickname resent out of habit would travel as an
+ * instruction and overwrite a rename made from another phone while this
+ * form sat open. No id makes it a create, the name is then required, and
+ * the backend mints the id. The changed keys follow in POT_FIELDS order. */
+fun potBody(id: String?, name: String?, changed: Map<String, String>): String =
     buildList {
         if (!id.isNullOrEmpty()) add("id=$id")
-        add("name=" + tokenize(name))
+        if (name != null) add("name=" + tokenize(name))
         for (field in POT_FIELDS) changed[field.key]?.let { add("${field.key}=$it") }
     }.joinToString(" ")
 

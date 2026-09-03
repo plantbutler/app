@@ -99,6 +99,27 @@ class PotFormTest {
         assertEquals("id=pot-3f9a21 name=genovese", potBody("pot-3f9a21", "genovese", emptyMap()))
         // An empty id is not an id: it would key the upsert on nothing.
         assertEquals("name=basil", potBody("", "basil", emptyMap()))
+        // No name at all: an edit that is not a rename. The backend's own
+        // canonical recalibration body has this shape.
+        assertEquals(
+            "id=pot-3f9a21 dry_raw=13000 wet_raw=4200",
+            potBody("pot-3f9a21", null, mapOf("dry_raw" to "13000", "wet_raw" to "4200")),
+        )
+        assertEquals("id=pot-3f9a21 channel=4", potBody("pot-3f9a21", null, mapOf("channel" to "4")))
+    }
+
+    @Test
+    fun `formDirty sees a rename, a changed field and a blanked one, and nothing else`() {
+        val stored = draftOf(basil)
+        assertFalse(formDirty(stored, stored))
+        assertTrue(formDirty(stored, stored + ("name" to "genovese")))
+        assertTrue(formDirty(stored, stored + ("target_low_pct" to "35")))
+        assertTrue(formDirty(stored, stored + ("controller" to "")))
+        // Retyping the same values, however spelt, is not a change.
+        assertFalse(formDirty(stored, stored + ("name" to " basil ")))
+        assertFalse(formDirty(stored, stored + ("target_low_pct" to "30")))
+        // A blanked name is not a change the wire could carry.
+        assertFalse(formDirty(stored, stored + ("name" to "  ")))
     }
 
     @Test

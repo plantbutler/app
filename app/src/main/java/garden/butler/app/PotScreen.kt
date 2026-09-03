@@ -70,10 +70,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     val title = pot?.name ?: screen.original["name"] ?: "New pot"
     val nowS = model.nowS()
     val emptied = emptiedFields(screen.original, screen.draft)
-    val dirty =
-        changedFields(screen.original, screen.draft).isNotEmpty() ||
-            emptied.isNotEmpty() ||
-            renamed(screen.original, screen.draft)
+    val dirty = formDirty(screen.original, screen.draft)
     val collision = garden != null && nameTaken(garden, screen.draft["name"].orEmpty(), screen.id)
     var askDiscard by remember { mutableStateOf(false) }
     val leave = { if (dirty) askDiscard = true else model.back() }
@@ -141,6 +138,11 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                 )
             }
             val named = !screen.draft["name"].isNullOrBlank()
+            // Save goes grey without a name; say so, the way a blanked
+            // stored field says so, rather than leave the user hunting.
+            if (!named) {
+                Text("give the pot a name", style = MaterialTheme.typography.bodySmall)
+            }
             Button(
                 onClick = model::save,
                 enabled = dirty && named && !screen.saving && emptied.isEmpty() && !collision,

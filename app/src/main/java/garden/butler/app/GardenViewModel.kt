@@ -295,7 +295,11 @@ class GardenViewModel(
             return onPot(form) { it.copy(refused = why) }
         }
         onPot(form) { it.copy(saving = true, refused = null) }
-        val body = potBody(form.id, name, changedFields(form.original, form.draft))
+        // A create must name the pot; an edit names it only to rename it,
+        // so an unrelated field change cannot carry a stale nickname back
+        // over a rename that landed from another phone meanwhile.
+        val naming = if (form.id == null || renamed(form.original, form.draft)) name else null
+        val body = potBody(form.id, naming, changedFields(form.original, form.draft))
         viewModelScope.launch {
             // A save that timed out client-side may still have committed:
             // the refresh after it, either way, shows what the backend has.
@@ -337,10 +341,7 @@ class GardenViewModel(
         if (parent.saving) return
         // A rename is a change like any other here: the wizard posts the
         // stored name, so an unsaved one would be silently dropped.
-        if (changedFields(parent.original, parent.draft).isNotEmpty() ||
-            emptiedFields(parent.original, parent.draft).isNotEmpty() ||
-            renamed(parent.original, parent.draft)
-        ) {
+        if (formDirty(parent.original, parent.draft)) {
             return noteOnPot(
                 parent,
                 "save or discard your changes first — the wizard calibrates the stored controller and channel",
@@ -350,7 +351,7 @@ class GardenViewModel(
         viewModelScope.launch {
             val refusal =
                 try {
-                    arm(parent, name)
+                    arm(parent, id, name)
                 } catch (why: CancellationException) {
                     throw why
                 } catch (why: Exception) {
@@ -362,7 +363,7 @@ class GardenViewModel(
     }
 
     /** Null once the wizard is up over `parent`; else why it is not. */
-    private suspend fun arm(parent: Screen.Pot, name: String): String? {
+    private suspend fun arm(parent: Screen.Pot, id: String, name: String): String? {
         val (pots, health) =
             try {
                 withContext(Dispatchers.IO) { backend.pots() to backend.health() }
@@ -372,7 +373,9 @@ class GardenViewModel(
                 return "could not reach the butler: ${why.message ?: why}"
             }
         current.value = UiState.Ready(splitGarden(pots, health, phoneS()))
-        val pot = pots.firstOrNull { it.name == name } ?: return "$name is no longer on the backend"
+        // By id: the fresh fetch is here to catch drift, and a rename is
+        // exactly the drift a name lookup would misread as a missing pot.
+        val pot = pots.firstOrNull { it.id == id } ?: return "$name is no longer on the backend"
         val on = health.controllers.firstOrNull { it.controller == pot.controller }
         canCalibrate(pot, on, nowS(), health.nextDefault)?.let { return it }
         val controller = pot.controller ?: return "map a controller and a channel first"
@@ -436,11 +439,10 @@ class GardenViewModel(
     }
 
     private fun saveCalibration(parent: Screen.Pot, s: CalState.Saving) {
-        // The stored name, not the draft's: the wizard refused to arm over
-        // an unsaved rename, so these are the same, and the stored one
-        // cannot carry a half-typed nickname into a calibration save.
-        val name = parent.original["name"] ?: return
-        val body = potBody(parent.id, name, mapOf("dry_raw" to "${s.dry}", "wet_raw" to "${s.wet}"))
+        // No name at all: a wizard can stand open for minutes, and the two
+        // numbers are the whole edit. Resending the nickname it opened with
+        // would undo a rename made anywhere else in that time.
+        val body = potBody(parent.id, null, mapOf("dry_raw" to "${s.dry}", "wet_raw" to "${s.wet}"))
         viewModelScope.launch {
             val outcome =
                 try {

@@ -198,7 +198,9 @@ class Backend(private val baseUrl: String, private val token: String = "") {
 
     fun health(): Health = parseHealth(get("/health"))
 
-    /** `name=<pot> k=v…`, built by potBody(); answers `pot=<name>`. */
+    /** `id=<pot> name=<nickname> k=v…`, built by potBody(); answers
+     * `pot=<id> name=<name>`, which nothing reads: the refresh after it is
+     * what the screen believes. */
     fun postPot(body: String): String = post("/pot", body)
 
     fun approve(cmdId: Long): String = post("/approve", "cmd=$cmdId")

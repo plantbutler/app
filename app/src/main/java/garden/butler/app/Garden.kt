@@ -27,6 +27,12 @@ fun Garden.potById(id: String): Pot? =
 fun Garden.potNamed(name: String): Pot? =
     (pots + disabled + env).firstOrNull { it.name == name }
 
+/** A pot's key in the list. The id, which a rename does not move; a
+ * backend too old to send one would give every row the same empty key, and
+ * a LazyColumn throws on a duplicate, so fall back to the name there
+ * rather than take the whole list down. */
+fun potKey(pot: Pot): String = pot.id.ifEmpty { "name:" + pot.name }
+
 fun splitGarden(all: List<Pot>, health: Health, nowS: Long): Garden {
     val enabled = all.filter { it.enabled == 1 }
     return Garden(

@@ -64,6 +64,15 @@ class GardenTest {
     }
 
     @Test
+    fun `the list keys on the id, and falls back to the name when there is none`() {
+        assertEquals("pot-1", potKey(pot("basil", id = "pot-1")))
+        // A backend too old to send ids would key every row the same and a
+        // LazyColumn throws on a duplicate: the names still differ.
+        assertEquals("name:basil", potKey(pot("basil", id = "")))
+        assertEquals("name:mint", potKey(pot("mint", id = "")))
+    }
+
+    @Test
     fun `env pots split off and disabled pots vanish`() {
         val garden =
             splitGarden(

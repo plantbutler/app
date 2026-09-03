@@ -40,6 +40,7 @@ class GardenViewModelTest {
         @Volatile var failPots = false
         @Volatile var potAnswer = MockResponse().setBody("pot=pot-1 name=basil\n")
         @Volatile var potsGate: CountDownLatch? = null
+        @Volatile var potGate: CountDownLatch? = null
         @Volatile var failHistory = false
         @Volatile var proposal = false
         @Volatile var lastDose: String? = null
@@ -74,7 +75,10 @@ class GardenViewModelTest {
                                             "next_s": ${nextS ?: "null"}, "float": 1, "pos": "ok"
                                             ${slot?.let { ", \"command\": $it" } ?: ""}}]}""",
                     )
-                "/pot" -> potAnswer
+                "/pot" -> {
+                    potGate?.await(5, TimeUnit.SECONDS)
+                    potAnswer
+                }
                 "/command" -> commandAnswer
                 "/history?c=b1&ch=0&hours=24&bucket_s=300" ->
                     if (failHistory) {
@@ -170,7 +174,9 @@ class GardenViewModelTest {
         val post = butler.posts().single()
         assertEquals("/pot", post.path)
         assertEquals("s3cret", post.getHeader("X-Token"))
-        assertEquals("id=pot-1 name=basil target_low_pct=35", post.body.readUtf8())
+        // No name=: this edit is not a rename, and resending the nickname
+        // would overwrite one made from another phone meanwhile.
+        assertEquals("id=pot-1 target_low_pct=35", post.body.readUtf8())
     }
 
     @Test
@@ -205,15 +211,38 @@ class GardenViewModelTest {
     }
 
     @Test
-    fun `saving a pot under its own unchanged name is not a clash`() {
+    fun `retyping a pot's own name is neither a clash nor a rename on the wire`() {
         ready()
         onMain {
             open("pot-1")
+            edit("name", " basil ") // the same name, spelt with the user's spaces
             edit("target_low_pct", "35")
             save()
         }
         waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
-        assertEquals("id=pot-1 name=basil target_low_pct=35", butler.posts().single().body.readUtf8())
+        // Not refused as a duplicate of itself, and not sent as a rename.
+        assertEquals("id=pot-1 target_low_pct=35", butler.posts().single().body.readUtf8())
+    }
+
+    @Test
+    fun `a save's outcome lands on the pot by id, even when the draft moves on before the answer`() {
+        ready()
+        val gate = CountDownLatch(1)
+        butler.potGate = gate
+        onMain {
+            open("pot-1")
+            edit("name", "genovese")
+            save()
+        }
+        waitFor("the POST in flight") { butler.sent("/pot").firstOrNull() }
+        // The user keeps typing while the backend has not answered: the open
+        // form's draft no longer matches what was posted. Keyed on the name,
+        // the outcome would never find its form and the screen would sit on
+        // saving = true for good.
+        onMain { edit("name", "yet_another_name") }
+        gate.countDown()
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        assertEquals("id=pot-1 name=genovese", butler.posts().single().body.readUtf8())
     }
 
     @Test
