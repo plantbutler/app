@@ -52,7 +52,15 @@ fun doseHistoryLine(dose: Dose, nowS: Long): String {
 /** Whose dose it was, for the garden-wide list. A dose no mapping window
  * claims says so instead of borrowing the name of whoever hangs on that
  * hose now — which is the whole reason the windows exist. */
-fun doseWho(dose: Dose): String = dose.potName ?: "no pot on that hose then"
+fun doseWho(dose: Dose): String =
+    dose.potName
+        ?: if (dose.sentTs == null) {
+            // Never handed out, so there is nothing to attribute yet —
+            // which is not the same as the windows saying nobody was there.
+            "not handed out yet"
+        } else {
+            "no pot on that hose then"
+        }
 
 /** The source, spelt for a human: who asked for this water. */
 fun doseSource(dose: Dose): String? =

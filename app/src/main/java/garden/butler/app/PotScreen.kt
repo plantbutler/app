@@ -125,7 +125,10 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                 pot.lastDose?.let { DoseCard(it, nowS) { v -> model.verdict(it.id, v) } }
             }
             if (pot != null) {
-                TextButton(onClick = { model.openDoses(pot.id, "${pot.name}'s water") }) {
+                TextButton(
+                    onClick = { model.openDoses(pot.id, "${pot.name}'s water") },
+                    enabled = !screen.saving, // leaving mid-save would strand this form
+                ) {
                     Text("Watering history")
                 }
             }

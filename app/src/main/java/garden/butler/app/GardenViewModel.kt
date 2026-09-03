@@ -88,6 +88,7 @@ class GardenViewModel(
     private var fetching: Job? = null
     private var refreshAgain = false
     private var historyFlight: Job? = null
+    private var dosesFlight: Job? = null
 
     private val shown = MutableStateFlow<Screen>(Screen.List)
     val screen: StateFlow<Screen> = shown
@@ -300,6 +301,13 @@ class GardenViewModel(
      * here has to guess whose dose was whose. */
     fun openDoses(potId: String?, title: String) {
         val parent = shown.value as? Screen.Pot
+        // Not while the form has something on the wire. Back restores this
+        // very snapshot, so leaving mid-save would bring back a form stuck
+        // on saving = true — its Save and Water greyed out for good, since
+        // the outcome lands on whatever form is shown and this one is not.
+        // Worse over the wizard's arming POST: the board would be left
+        // reporting every 5 s with no wizard on screen to restore it.
+        if (parent?.saving == true) return
         val screen = Screen.Doses(parent, potId, title)
         noteOnList.value = null
         shown.value = screen
@@ -308,21 +316,36 @@ class GardenViewModel(
 
     fun reloadDoses() = (shown.value as? Screen.Doses)?.let { loadDoses(it.copy(loading = true, why = null)) }
 
+    /** Single-flight, like the chart's loader: two quick pulls must not
+     * race, or the slower answer lands last and quietly replaces the
+     * fresher list with an older one. */
     private fun loadDoses(screen: Screen.Doses) {
         shown.value = screen
-        viewModelScope.launch {
-            try {
-                val answer = withContext(Dispatchers.IO) { backend.doses(screen.potId, DOSES_LIMIT) }
-                onDoses(screen) {
-                    it.copy(doses = answer.doses, nowS = answer.now, loading = false, why = null)
+        dosesFlight?.cancel()
+        dosesFlight =
+            viewModelScope.launch {
+                try {
+                    val answer = withContext(Dispatchers.IO) { backend.doses(screen.potId, DOSES_LIMIT) }
+                    onDoses(screen) {
+                        it.copy(
+                            doses = answer.doses,
+                            // A backend that sends no clock would otherwise
+                            // date every row to the epoch and render the lot
+                            // as "0s ago" — a confident wrong answer. The
+                            // phone's own clock is the honest fallback.
+                            nowS = if (answer.now > 0) answer.now else phoneS(),
+                            loading = false,
+                            why = null,
+                        )
+                    }
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    ensureActive()
+                    // The list already up stays up: a failed reload is weather.
+                    onDoses(screen) { it.copy(loading = false, why = why.message ?: why.toString()) }
                 }
-            } catch (why: CancellationException) {
-                throw why
-            } catch (why: Exception) {
-                // The list already up stays up: a failed reload is weather.
-                onDoses(screen) { it.copy(loading = false, why = why.message ?: why.toString()) }
             }
-        }
     }
 
     /** An answer lands only on the history it was asked for: the user may

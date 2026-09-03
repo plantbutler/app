@@ -43,6 +43,7 @@ class GardenViewModelTest {
         @Volatile var potGate: CountDownLatch? = null
         @Volatile var failHistory = false
         @Volatile var failDoses = false
+        @Volatile var dosesSayNow = true
         @Volatile var proposal = false
         @Volatile var lastDose: String? = null
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
@@ -99,7 +100,7 @@ class GardenViewModelTest {
                             MockResponse().setResponseCode(503).setBody("try again: x\n")
                         } else {
                             MockResponse().setBody(
-                                """{"now": $nowS, "doses": [
+                                """{${if (dosesSayNow) "\"now\": $nowS," else ""} "doses": [
                                      {"id": 7, "ml": 100, "cap_s": 30, "flow_ml": 96,
                                       "state": "acked", "source": "manual",
                                       "sent_ts": ${nowS - 600}, "acked_ts": ${nowS - 590},
@@ -390,6 +391,37 @@ class GardenViewModelTest {
         assertEquals("expired", history.doses?.last()?.state)
         onMain { back() }
         assertEquals(Screen.List, model.screen.value)
+    }
+
+    @Test
+    fun `the history will not open over a form with something on the wire`() {
+        ready()
+        val gate = CountDownLatch(1)
+        butler.potGate = gate
+        onMain {
+            open("pot-1")
+            edit("target_low_pct", "35")
+            save()
+        }
+        waitFor("the POST in flight") { butler.sent("/pot").firstOrNull() }
+        // Back would restore this very snapshot, saving and all, and the
+        // save's outcome lands on whatever form is shown — not this one.
+        onMain { openDoses("pot-1", "basil's water") }
+        assertEquals(true, model.screen.value is Screen.Pot)
+        assertEquals(emptyList(), butler.requests.filter { it.path?.startsWith("/doses") == true })
+        gate.countDown()
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+    }
+
+    @Test
+    fun `a backend that sends no clock does not date every dose to the epoch`() {
+        butler.dosesSayNow = false
+        ready()
+        onMain { openDoses("pot-1", "basil's water") }
+        val history = waitFor("the history") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
+        // The phone's own clock, not 0 — which would render the whole list
+        // as "0s ago" and look like fact.
+        assertEquals(true, history.nowS >= butler.nowS)
     }
 
     @Test
