@@ -7,28 +7,25 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// The backend URL and token come from an untracked local file (the plan's
-// "URL and token from an untracked local file"); a missing or half-edited
-// file fails the build loudly instead of producing an app that talks to
-// nowhere — and the values are escaped, or a quote in the token would land
-// verbatim in the generated BuildConfig.java.
+// The backend URL and token used to be required here and were the only
+// source. Since "Where is the butler?" (2026-09-04) the app asks on first
+// start and keeps the answer in the device's encrypted store, so this file
+// is optional and only prefills that screen for a development build.
+//
+// Optional is the point, not a convenience: an APK built without it carries
+// no token at all, which is what makes one build installable on somebody
+// else's phone against somebody else's butler.
+//
+// The values are still escaped, or a quote in the token would land verbatim
+// in the generated BuildConfig.java.
 val butler =
     Properties().apply {
         val file = rootProject.file("butler.properties")
-        require(file.exists()) {
-            "copy butler.properties.sample to butler.properties and fill in url= and token="
-        }
-        file.inputStream().use { load(it) }
+        if (file.exists()) file.inputStream().use { load(it) }
     }
 
-val butlerUrl =
-    requireNotNull(butler.getProperty("url")) { "butler.properties is missing url=" }
-val butlerToken =
-    requireNotNull(butler.getProperty("token")) { "butler.properties is missing token=" }
-
-require(butlerUrl.startsWith("http")) {
-    "butler.properties url= must start with http, got '$butlerUrl'"
-}
+val butlerUrl = butler.getProperty("url").orEmpty()
+val butlerToken = butler.getProperty("token").orEmpty()
 
 fun javaQuoted(value: String) =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -43,9 +40,9 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        // Only what the setup screen starts filled in with. Empty in a
+        // build made without butler.properties, and the app then asks.
         buildConfigField("String", "BUTLER_URL", javaQuoted(butlerUrl))
-        // Unused until the water-now pitch; baked already so the properties
-        // file's contract does not change under the next pitch's feet.
         buildConfigField("String", "BUTLER_TOKEN", javaQuoted(butlerToken))
     }
 
@@ -72,6 +69,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // The address and the token at rest on the phone. The token is the one
+    // secret this app holds, so it goes in the encrypted store rather than
+    // in plain preferences, which are a readable file to anything with root
+    // or a backup of one.
+    implementation("androidx.security:security-crypto:1.0.0")
     // The only picture the app loads: the care source's photograph of a
     // species, so somebody searching by common name can confirm by eye.
     implementation("io.coil-kt:coil-compose:2.7.0")

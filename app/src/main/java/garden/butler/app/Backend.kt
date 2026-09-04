@@ -1,5 +1,6 @@
 package garden.butler.app
 
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.SerialName
@@ -246,13 +247,66 @@ fun parseNextAnswer(answer: String): Int? =
     answer.trim().removePrefix("next=").takeIf { it != answer.trim() }?.toIntOrNull()
 
 /** The one place that touches the network. Blocking calls: the view model
- * runs them on Dispatchers.IO. */
-class Backend(private val baseUrl: String, private val token: String = "") {
+ * runs them on Dispatchers.IO.
+ *
+ * Where it points is not fixed at construction any more. The address stopped
+ * being a build constant on 2026-09-04, so the client that used to be built
+ * once from a default argument has to be able to be aimed somewhere else
+ * while the app is running — which is what `point` is for. The socket pool
+ * and the timeouts are the same either way, so the OkHttp client itself is
+ * built once and kept.
+ */
+class Backend(config: ButlerConfig = ButlerConfig("", "")) {
+    /** For the tests, and for a build that still bakes a default in. */
+    constructor(baseUrl: String, token: String = "") : this(ButlerConfig(baseUrl, token))
+
+    /** Read on the IO threads, written from the main one. */
+    @Volatile private var here: ButlerConfig = config
+
+    private val baseUrl: String
+        get() = here.url
+
+    private val token: String
+        get() = here.token
+
     private val client =
         OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .build()
+
+    /** Talk to that butler from now on. */
+    fun point(config: ButlerConfig) {
+        here = config
+    }
+
+    /** Where it is pointing, for a screen that says so. Never the token. */
+    val address: String
+        get() = here.url
+
+    /** Ask an address whether it is a butler and whether it likes a token,
+     * without pointing this client at it: the setup screen has to be able
+     * to try one address while the app still talks to the one that works.
+     *
+     * Never throws. Every way this can go wrong is one of the sentences the
+     * screen has to show, so they all come back as a Probe. */
+    fun probe(candidate: ButlerConfig): Probe =
+        try {
+            val request =
+                Request.Builder()
+                    .url(candidate.url.trimEnd('/') + "/hello")
+                    .header("X-Token", candidate.token)
+                    .build()
+            client.newCall(request).execute().use { answer ->
+                readHello(answer.code, answer.body?.string().orEmpty())
+            }
+        } catch (why: IllegalArgumentException) {
+            // urlProblem() should have caught this; if it did not, the
+            // screen still has to say something a person can act on.
+            Probe.NotTheButler("that address cannot be dialled: ${why.message}")
+        } catch (why: IOException) {
+            Probe.NoAnswer(why.message ?: why.toString())
+        }
 
     /** The token rides on reads too. Most of them do not need it — the
      * backend gates writes, not reads — but /species spends the household's

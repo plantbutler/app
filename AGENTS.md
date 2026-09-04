@@ -7,8 +7,10 @@ Three pitches in (2026-09-02): "Hello, pots", "Manage the garden" and "Water now
 ## What it is
 
 Native Android, Kotlin + Jetpack Compose. It talks only to the backend (over the tailnet, see
-below), with cleartext explicitly allowed; it never speaks to the board. The backend URL and
-token come from an untracked local file. Alerts do not go through the app in v1 — they arrive
+below), with cleartext explicitly allowed; it never speaks to the board. The backend URL and token
+are asked for on first start and kept in the phone's encrypted store (2026-09-04); an untracked
+`butler.properties` still prefills that screen for a development build, but is optional and no
+longer the only source. Alerts do not go through the app in v1 — they arrive
 by ntfy. No DI framework, no MVI, no navigation library, no offline cache: one ViewModel, two
 state flows, pure functions for every decision, JVM tests only.
 
@@ -124,6 +126,21 @@ is on screen. Nothing is queued to send later.
   opened from so Back gives a half-typed edit back. The rows that went wrong carry their own
   line in the error colour instead of being filtered out, and the list says it is the last N
   rather than everything, since the commands table is never pruned.
+- `Settings.kt` — where the butler is, as this phone holds it. `ButlerConfig` (whose toString
+  never prints the token — a data class in a state flow is one crash report away from a log line),
+  `normaliseUrl` (a missing scheme becomes **http**, never https: the NAS is plain HTTP on the
+  tailnet and the laptop is plain HTTP on the LAN, so cleartext has to keep working), `urlProblem`
+  (OkHttp's own parser, since it is the one that will have to dial it), `tokenProblem` (whitespace
+  is a wrong token, because the backend compares byte for byte), and the four-way `Probe` with
+  `readHello`/`probeLine`. `EncryptedConfigStore` is the store itself: EncryptedSharedPreferences,
+  `commit()` not `apply()`, and a store that will not decrypt (a restore onto another device, a
+  wiped keystore) is deleted and asked for again rather than thrown — the alternative is an app
+  that never starts.
+- `SetupScreen.kt` — the address and the token, on first start and from the garden afterwards.
+  Nothing here can be checked by looking at it, so Connect makes a real `GET /hello` and the
+  sentence under the fields says **which** of three things went wrong: the address, the token, or
+  what is listening there. Only one of them is fixed by retyping the token, and telling them apart
+  is most of what the screen is for. The token field is dots with a show/hide.
 - `Main.kt` — `App()`: one `when` over `Screen`, the 60 s refresh loop (paused while the
   wizard polls every 2 s), the BackHandler for the wizard. `GardenScreen.kt`, `PotScreen.kt`
   (hero line, the chart, the water row, proposal card, dose card with verdict chips, discard
@@ -131,10 +148,12 @@ is on screen. Nothing is queued to send later.
   state; leaving the foreground cancels the wizard so the restore runs).
 
 `app/src/test/java/garden/butler/app/` — JVM tests only: reducers and lines
-(`CalibrationTest`, `ChartTest`, `WaterTest`, `PotFormTest`, `GardenTest`), wire parsing
-(`BackendTest`), the HTTP layer against `MockWebServer` (`BackendWireTest`), and the
+(`CalibrationTest`, `ChartTest`, `WaterTest`, `PotFormTest`, `GardenTest`, `SettingsTest`), wire
+parsing (`BackendTest`), the HTTP layer against `MockWebServer` (`BackendWireTest`), the
 ViewModel driver against `MockWebServer` with `Dispatchers.setMain` and a settable clock
-(`GardenViewModelTest`). The Canvas itself is the one thing without a test: everything it
+(`GardenViewModelTest`), and first start and changing butler against **two** fake butlers on two
+sockets (`SetupFlowTest`) — two, because the half of that pitch worth testing only exists when
+there are two: whose cache this is, and where a slow answer lands. The Canvas itself is the one thing without a test: everything it
 draws comes from a pure function that has one. No emulator anywhere.
 
 Known limits, on purpose: no clearing a field (`enabled=0` and `mode=manual` cover the real cases), the backend keeps an interval override forever (a process death between

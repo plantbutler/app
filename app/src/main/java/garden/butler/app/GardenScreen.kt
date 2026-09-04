@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -52,6 +53,9 @@ fun GardenScreen(model: GardenViewModel) {
                         Icon(Icons.AutoMirrored.Filled.List, "Watering history")
                     }
                     IconButton(onClick = model::newPot) { Icon(Icons.Default.Add, "New pot") }
+                    IconButton(onClick = model::openSettings) {
+                        Icon(Icons.Default.Settings, "Where the butler is")
+                    }
                 },
             )
         },

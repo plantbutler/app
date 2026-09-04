@@ -24,10 +24,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme { // stock Material3; theming is a no-go in v1
-                // The cache needs the app's own storage, which is the only
-                // reason this view model is not the no-argument one.
+                // The cache needs the app's own storage and the settings
+                // need its keystore, which is the only reason this view
+                // model is not the no-argument one.
                 val cache = FileGardenCache(File(applicationContext.filesDir, "garden.json"))
-                App(viewModel(factory = GardenViewModel.factory(cache)))
+                val settings = EncryptedConfigStore(applicationContext)
+                App(viewModel(factory = GardenViewModel.factory(cache, settings)))
             }
         }
     }
@@ -61,5 +63,6 @@ fun App(model: GardenViewModel) {
         is Screen.Pot -> PotScreen(model, it)
         is Screen.Calibrate -> CalibrateScreen(model, it)
         is Screen.Doses -> DosesScreen(model, it)
+        is Screen.Setup -> SetupScreen(model, it)
     }
 }

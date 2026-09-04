@@ -182,6 +182,10 @@ class GardenViewModelTest {
             writes += cached
             held = cached
         }
+
+        override fun clear() {
+            held = null
+        }
     }
 
     private val main = newSingleThreadContext("main")

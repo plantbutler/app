@@ -1,4 +1,11 @@
-# Copy to butler.properties (gitignored) and fill in. Both values bake into
-# BuildConfig at build time; the URL is the NAS on the LAN, cleartext HTTP.
+# Optional since "Where is the butler?" (2026-09-04). The app asks for the
+# address and the token on first start and keeps them in the phone's
+# encrypted store, so this file is no longer the only source and no longer
+# required: an APK built without it carries no token at all, which is what
+# makes one build installable on another phone against another butler.
+#
+# Copy to butler.properties (gitignored) and fill in to prefill the setup
+# screen on a development build. The URL may be typed without a scheme —
+# the app assumes http, since the NAS is plain HTTP on the tailnet.
 url=http://192.168.1.42:9380
 token=changeme
