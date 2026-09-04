@@ -24,12 +24,27 @@ data class CachedGarden(
      * "how long since I last heard anything", which is a question about
      * this phone. */
     @SerialName("at_s") val atS: Long = 0,
+    /** Which butler these plants came from. The cache is cleared when the
+     * app is pointed somewhere else, and this is what makes that safe
+     * rather than merely likely: a delete that failed, or a kill between
+     * storing the new address and clearing the file, would otherwise show
+     * one server's garden under another's name. An older cache file has no
+     * address and is discarded once, which costs one launch of the banner
+     * and nothing else. */
+    val url: String = "",
 )
 
 interface GardenCache {
     fun read(): CachedGarden?
 
     fun write(cached: CachedGarden)
+
+    /** Forget everything. A cache belongs to one butler: point the app at
+     * another and the old server's plants must not be what the new one's
+     * garden shows while it loads — under a banner saying they are current
+     * as of five minutes ago, which they are, on a machine nobody is
+     * talking to any more. */
+    fun clear()
 }
 
 /** One JSON file in the app's own storage. Every failure is a miss: a cache
@@ -62,6 +77,18 @@ class FileGardenCache(private val file: File) : GardenCache {
             }
         } catch (why: Exception) {
             // A cache that cannot be written is a cache miss next launch.
+        }
+    }
+
+    override fun clear() {
+        try {
+            file.delete()
+            File(file.parentFile, file.name + ".tmp").delete()
+        } catch (why: Exception) {
+            // Same as a failed write: the worst case is a stale file, and
+            // read() throws it away the moment it will not decode. What
+            // must not happen is the app failing to change butler because
+            // a file would not delete.
         }
     }
 }

@@ -182,6 +182,10 @@ class GardenViewModelTest {
             writes += cached
             held = cached
         }
+
+        override fun clear() {
+            held = null
+        }
     }
 
     private val main = newSingleThreadContext("main")
@@ -735,12 +739,17 @@ class GardenViewModelTest {
     private fun cachedPot(name: String = "basil") =
         Pot(id = "pot-1", name = name, controller = "b1", channel = 0, outlet = 3, doseMl = 100, raw = 9000)
 
+    /** Stamped with the butler it came from, as every real write is: a
+     * cache is opened only by the address that wrote it. */
+    private fun cached(pots: kotlin.collections.List<Pot>, health: Health, atS: Long) =
+        CachedGarden(pots, health, atS = atS, url = server.url("/").toString())
+
     private fun withCache(cache: FakeCache): GardenViewModel =
         GardenViewModel(Backend(server.url("/").toString(), token = "s3cret"), cache = cache)
 
     @Test
     fun `the cache fills the screen at launch, stamped with its age`() {
-        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
         model = withCache(cache)
         onMain { openCache() }
         val shown = waitFor("the cached garden") { model.state.value as? UiState.Ready }
@@ -752,7 +761,7 @@ class GardenViewModelTest {
 
     @Test
     fun `a live answer clears the stamp and is written back to the cache`() {
-        val cache = FakeCache(CachedGarden(listOf(cachedPot("stale")), Health(), atS = butler.nowS - 7200))
+        val cache = FakeCache(cached(listOf(cachedPot("stale")), Health(), butler.nowS - 7200))
         model = withCache(cache)
         onMain { openCache() }
         waitFor("the cached garden") { model.state.value as? UiState.Ready }
@@ -770,7 +779,7 @@ class GardenViewModelTest {
         // usually beats the disk, so the cache has to be allowed to land on
         // a Trouble screen or the app is blank exactly when it should not be.
         butler.failPots = true
-        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
         model = withCache(cache)
         onMain { refresh() }
         waitFor("the trouble") { model.state.value as? UiState.Trouble }
@@ -782,7 +791,7 @@ class GardenViewModelTest {
 
     @Test
     fun `the reset chip is refused while the screen is a memory`() {
-        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
         model = withCache(cache)
         onMain { openCache() }
         waitFor("the cached garden") { model.state.value as? UiState.Ready }
@@ -807,7 +816,7 @@ class GardenViewModelTest {
 
     @Test
     fun `a cache that arrives after a live answer does not replace it`() {
-        val cache = FakeCache(CachedGarden(listOf(cachedPot("stale")), Health(), atS = butler.nowS - 7200))
+        val cache = FakeCache(cached(listOf(cachedPot("stale")), Health(), butler.nowS - 7200))
         model = withCache(cache)
         ready()
         onMain { openCache() }
@@ -819,7 +828,7 @@ class GardenViewModelTest {
 
     @Test
     fun `nothing is written to the butler while the screen is a memory`() {
-        val cache = FakeCache(CachedGarden(listOf(cachedPot()), Health(ok = true), atS = butler.nowS - 7200))
+        val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
         model = withCache(cache)
         onMain { openCache() }
         waitFor("the cached garden") { model.state.value as? UiState.Ready }

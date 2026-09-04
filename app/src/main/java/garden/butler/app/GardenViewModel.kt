@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,6 +65,26 @@ sealed interface Screen {
 
     data class Calibrate(val parent: Pot, val cal: CalState) : Screen
 
+    /** The address and the token: on first start, and from the garden's
+     * settings after that. `first` is true when there is nothing behind
+     * this screen — no garden to go back to, and Back exits the app, which
+     * is what Back on the first screen of an app does. */
+    data class Setup(
+        val url: String,
+        val token: String,
+        val first: Boolean,
+        val checking: Boolean = false,
+        val why: String? = null,
+        /** The token is dots until this says otherwise. */
+        val show: Boolean = false,
+    ) : Screen {
+        /** Never the token. This is a data class in a state flow, and the
+         * generated toString is the shortest path from a secret to a log
+         * line or a crash report. */
+        override fun toString(): String =
+            "Setup(url=$url, first=$first, checking=$checking, why=$why)"
+    }
+
     /** The watering history, over the form it was opened from — `parent`
      * null means it was opened from the list and covers the whole garden.
      * `nowS` is the server's own clock from the answer, so "3h ago" is not
@@ -105,6 +127,16 @@ class GardenViewModel(
      * the tailnet. Null means no cache at all — which is what the tests
      * that predate it get. */
     private val cache: GardenCache? = null,
+    /** Where the butler is, as this device holds it. Null means the address
+     * is whatever `backend` was built with and cannot be changed — which is
+     * what the JVM tests that predate the setup screen get, and what the
+     * app itself was until 2026-09-04. */
+    private val settings: ConfigStore? = null,
+    /** What the setup screen starts filled in with when nothing is stored.
+     * A development build bakes them from butler.properties; a build made
+     * without that file prefills nothing and carries no token. */
+    private val defaults: ButlerConfig =
+        ButlerConfig(BuildConfig.BUTLER_URL, BuildConfig.BUTLER_TOKEN),
 ) : ViewModel() {
     private val current = MutableStateFlow<UiState>(UiState.Loading)
     val state: StateFlow<UiState> = current
@@ -119,6 +151,52 @@ class GardenViewModel(
     private val noteOnList = MutableStateFlow<String?>(null)
     val listNote: StateFlow<String?> = noteOnList
 
+    /** Everything this view model has in the air, as one job it can drop.
+     * Pointing the app at another butler cancels the lot: an answer from
+     * the old address landing on the new one's screen is the same mistake
+     * as keeping its cache, and a slow /pots is exactly the shape that
+     * would do it. A supervisor, like viewModelScope's own job, so one
+     * flight failing does not take its siblings with it; a child of that
+     * job, so clearing the view model still cancels everything. */
+    private var work = SupervisorJob(viewModelScope.coroutineContext[Job])
+
+    private fun flight(block: suspend CoroutineScope.() -> Unit): Job =
+        viewModelScope.launch(work, block = block)
+
+    /** True once the app knows which butler it is talking to. Nothing goes
+     * on the wire before that, and nothing comes off the disk either. */
+    private var addressed = settings == null
+
+    /** Which attempt to point the app at a butler is the current one.
+     *
+     * A probe takes five seconds to time out, and in five seconds somebody
+     * can go back, come in again and connect somewhere else. The pointing
+     * coroutine is the one thing here that is not a flight — it is what
+     * cancels the flights — so nothing can cancel it, and it has to know
+     * for itself when it has been superseded. Without this a slow first
+     * Connect finishes last and moves the app back to the butler the user
+     * just left: the same failure this pitch is about, through another
+     * door. */
+    private var attempt = 0
+
+    init {
+        val store = settings
+        if (store != null) {
+            // Not a flight: this is what decides where the flights go.
+            viewModelScope.launch {
+                val stored = withContext(Dispatchers.IO) { store.read() }?.takeIf { it.complete }
+                if (stored == null) {
+                    shown.value = Screen.Setup(defaults.url, defaults.token, first = true)
+                } else {
+                    backend.point(stored)
+                    addressed = true
+                    openCache()
+                    refresh()
+                }
+            }
+        }
+    }
+
     /** The cache is opened once, and fills any screen a live answer has not
      * already filled — including a Trouble screen, which is the whole point:
      * off the tailnet the network fails fast and usually beats the disk, and
@@ -127,9 +205,19 @@ class GardenViewModel(
      * the butler's own answer or this same cache already. */
     fun openCache() {
         val store = cache ?: return
-        viewModelScope.launch {
-            val cached = withContext(Dispatchers.IO) { store.read() } ?: return@launch
-            if (current.value is UiState.Ready) return@launch
+        if (!addressed) return
+        flight {
+            val cached = withContext(Dispatchers.IO) { store.read() } ?: return@flight
+            if (current.value is UiState.Ready) return@flight
+            // Whose plants these are. clear() runs when the app is pointed
+            // somewhere else, but a delete that failed, or a kill in
+            // between, would leave one butler's garden to be shown under
+            // another's name; this is what makes that impossible rather
+            // than unlikely. A file with no address at all is discarded
+            // too: it was written by a build where the address could not
+            // change, and the first thing this build does on top of one is
+            // ask for an address, which may well be a different one.
+            if (cached.url != backend.address) return@flight
             current.value =
                 UiState.Ready(
                     splitGarden(cached.pots, cached.health, phoneS()),
@@ -143,6 +231,11 @@ class GardenViewModel(
     private var calController: String? = null
 
     fun refresh() {
+        // Nothing is asked of a butler whose address is not known yet. The
+        // minute loop and the pull-to-refresh both fire regardless of what
+        // is on screen, so this is where that is stopped rather than at
+        // every caller.
+        if (!addressed) return
         // Single-flight: resume + pull + retry taps must not stack fetches,
         // and a slow loser must never overwrite a fresh success with its
         // stale failure. A request that lands mid-fetch is not dropped: it
@@ -159,55 +252,54 @@ class GardenViewModel(
                 else -> before
             }
         fetching =
-            viewModelScope
-                .launch {
-                    val fresh =
-                        try {
-                            val garden =
-                                withContext(Dispatchers.IO) {
-                                    splitGarden(backend.pots(), backend.health(), phoneS())
-                                }
+            flight {
+                val fresh =
+                    try {
+                        val garden =
                             withContext(Dispatchers.IO) {
-                                // Nothing derived goes to disk: a stored
-                                // percentage would be read back through
-                                // whatever calibration the pot has when the
-                                // cache is opened, and after a recalibration
-                                // that is a different scale. potLine derives
-                                // it from the cached raw instead.
-                                cache?.write(
-                                    CachedGarden(
-                                        garden.all().map { it.copy(pct = null) },
-                                        garden.health,
-                                        phoneS(),
-                                    ),
-                                )
+                                splitGarden(backend.pots(), backend.health(), phoneS())
                             }
-                            UiState.Ready(garden)
-                        } catch (why: CancellationException) {
-                            throw why // cancellation is not a backend problem
-                        } catch (why: Exception) {
-                            when (val before = current.value) {
-                                // A displayed garden survives a failed refresh: a
-                                // busy-database 503 must not blank the sofa view.
-                                is UiState.Ready ->
-                                    before.copy(
-                                        refreshing = false,
-                                        why = why.message ?: why.toString(),
-                                    )
-                                else -> UiState.Trouble(why.message ?: why.toString())
-                            }
+                        withContext(Dispatchers.IO) {
+                            // Nothing derived goes to disk: a stored
+                            // percentage would be read back through
+                            // whatever calibration the pot has when the
+                            // cache is opened, and after a recalibration
+                            // that is a different scale. potLine derives
+                            // it from the cached raw instead.
+                            cache?.write(
+                                CachedGarden(
+                                    garden.all().map { it.copy(pct = null) },
+                                    garden.health,
+                                    phoneS(),
+                                    backend.address,
+                                ),
+                            )
                         }
-                    current.value = fresh
-                    if (fresh is UiState.Ready) rideRefresh(fresh.garden)
-                }
-                .also { job ->
-                    job.invokeOnCompletion {
-                        if (refreshAgain) {
-                            refreshAgain = false
-                            refresh()
+                        UiState.Ready(garden)
+                    } catch (why: CancellationException) {
+                        throw why // cancellation is not a backend problem
+                    } catch (why: Exception) {
+                        when (val before = current.value) {
+                            // A displayed garden survives a failed refresh: a
+                            // busy-database 503 must not blank the sofa view.
+                            is UiState.Ready ->
+                                before.copy(
+                                    refreshing = false,
+                                    why = why.message ?: why.toString(),
+                                )
+                            else -> UiState.Trouble(why.message ?: why.toString())
                         }
                     }
+                current.value = fresh
+                if (fresh is UiState.Ready) rideRefresh(fresh.garden)
+            }.also { job ->
+                job.invokeOnCompletion {
+                    if (refreshAgain) {
+                        refreshAgain = false
+                        refresh()
+                    }
                 }
+            }
     }
 
     /** The open form rides every successful refresh: its curve reloads so a
@@ -257,7 +349,7 @@ class GardenViewModel(
         val channel = pot.channel ?: return
         historyFlight?.cancel()
         historyFlight =
-            viewModelScope.launch {
+            flight {
                 try {
                     val history =
                         withContext(Dispatchers.IO) {
@@ -316,7 +408,7 @@ class GardenViewModel(
         val outlet = pot.outlet ?: return
         val ml = pot.doseMl ?: return
         onPot(form) { it.copy(saving = true, waterRefused = null) }
-        viewModelScope.launch {
+        flight {
             // A POST that timed out client-side may still have queued the
             // dose: the refresh after it shows the slot either way.
             try {
@@ -356,8 +448,110 @@ class GardenViewModel(
     }
 
     fun newPot() {
+        if (!addressed) return
         noteOnList.value = null
         shown.value = Screen.Pot(null, emptyMap(), emptyMap())
+    }
+
+    /** Change the address or the token. The stored token goes into the
+     * field rather than being blanked — moving the NAS should not mean
+     * typing a secret again — and shows as dots until the eye is tapped. */
+    fun openSettings() {
+        val store = settings ?: return
+        // Whatever was being tried is no longer what the user is doing.
+        attempt++
+        noteOnList.value = null
+        flight {
+            val stored = withContext(Dispatchers.IO) { store.read() }
+            shown.value =
+                Screen.Setup(
+                    stored?.url ?: defaults.url,
+                    stored?.token ?: defaults.token,
+                    first = false,
+                )
+        }
+    }
+
+    fun editSetup(url: String? = null, token: String? = null) =
+        onSetup { it.copy(url = url ?: it.url, token = token ?: it.token, why = null) }
+
+    fun revealToken(show: Boolean) = onSetup { it.copy(show = show) }
+
+    /** Prove the address and the token with a real call, then keep them.
+     *
+     * The proof is the point. Nothing here can be validated by looking at
+     * it: an address that parses may have nothing behind it, and a token is
+     * only ever right or wrong to the butler. What comes back is one of
+     * three different mistakes, and the sentence says which — because only
+     * one of them is fixed by retyping the token. */
+    fun saveSetup() {
+        val form = shown.value as? Screen.Setup ?: return
+        val store = settings ?: return
+        if (form.checking) return // one address is being tried already
+        urlProblem(form.url)?.let { why -> return onSetup { it.copy(why = why) } }
+        tokenProblem(form.token)?.let { why -> return onSetup { it.copy(why = why) } }
+        val candidate = ButlerConfig(normaliseUrl(form.url), form.token.trim())
+        onSetup { it.copy(checking = true, why = null) }
+        val mine = ++attempt
+        // Deliberately not a flight: pointing the app somewhere else cancels
+        // every flight, and this is the coroutine that does the pointing.
+        // Which is exactly why it needs `attempt` of its own — nothing else
+        // can cancel it, so it has to know when it has been superseded.
+        viewModelScope.launch {
+            val probe = withContext(Dispatchers.IO) { backend.probe(candidate) }
+            if (mine != attempt) return@launch
+            if (probe !is Probe.Butler) {
+                return@launch onSetup {
+                    it.copy(checking = false, why = probeLine(probe, hostOf(candidate.url)))
+                }
+            }
+            val kept =
+                try {
+                    withContext(Dispatchers.IO) {
+                        store.write(candidate)
+                        // The cache belongs to one butler. Clear it before
+                        // the app is pointed, so there is no moment where
+                        // the new address could open the old one's garden.
+                        cache?.clear()
+                    }
+                    null
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    "the butler answered, but this phone could not store the address: " +
+                        (why.message ?: why.toString())
+                }
+            if (mine != attempt) return@launch
+            if (kept != null) {
+                return@launch onSetup { it.copy(checking = false, why = kept) }
+            }
+            pointAt(candidate)
+        }
+    }
+
+    /** Talk to that butler from now on. Everything in the air is dropped
+     * first: a /pots from the old address landing afterwards would put its
+     * plants on the new one's screen, and a wizard's interval restore would
+     * be posted to a machine that never sped up. */
+    private fun pointAt(config: ButlerConfig) {
+        work.cancel()
+        work = SupervisorJob(viewModelScope.coroutineContext[Job])
+        fetching = null
+        historyFlight = null
+        dosesFlight = null
+        polling = null
+        refreshAgain = false
+        calController = null
+        backend.point(config)
+        addressed = true
+        current.value = UiState.Loading
+        noteOnList.value = null
+        shown.value = Screen.List
+        refresh()
+    }
+
+    private inline fun onSetup(change: (Screen.Setup) -> Screen.Setup) {
+        shown.update { if (it is Screen.Setup) change(it) else it }
     }
 
     fun edit(key: String, value: String) =
@@ -370,6 +564,9 @@ class GardenViewModel(
             // reading the history is not a reason to lose an edit.
             is Screen.Doses -> shown.value = here.parent ?: Screen.List
             is Screen.Pot -> shown.value = Screen.List
+            // On first start there is no garden behind this, so Back is
+            // what Back on an app's first screen is: leaving the app.
+            is Screen.Setup -> if (!here.first) shown.value = Screen.List
             Screen.List -> Unit
         }
     }
@@ -378,6 +575,7 @@ class GardenViewModel(
      * list. The rows come from the backend already attributed, so nothing
      * here has to guess whose dose was whose. */
     fun openDoses(potId: String?, title: String) {
+        if (!addressed) return
         val parent = shown.value as? Screen.Pot
         // Not while the form has something on the wire. Back restores this
         // very snapshot, so leaving mid-save would bring back a form stuck
@@ -403,7 +601,7 @@ class GardenViewModel(
         val fresh = screen.copy(loadingMore = false)
         shown.value = fresh
         dosesFlight =
-            viewModelScope.launch {
+            flight {
                 try {
                     val answer = withContext(Dispatchers.IO) { backend.doses(fresh.potId, DOSES_LIMIT) }
                     onDoses(fresh) {
@@ -442,7 +640,7 @@ class GardenViewModel(
         val asking = screen.copy(loadingMore = true, why = null)
         shown.value = asking
         dosesFlight =
-            viewModelScope.launch {
+            flight {
                 try {
                     val answer = withContext(Dispatchers.IO) { backend.doses(asking.potId, DOSES_LIMIT, cursor) }
                     onDoses(asking) {
@@ -490,7 +688,7 @@ class GardenViewModel(
         // over a rename that landed from another phone meanwhile.
         val naming = if (form.id == null || renamed(form.original, form.draft)) name else null
         val body = potBody(form.id, naming, changedFields(form.original, form.draft))
-        viewModelScope.launch {
+        flight {
             // A save that timed out client-side may still have committed:
             // the refresh after it, either way, shows what the backend has.
             try {
@@ -515,7 +713,7 @@ class GardenViewModel(
             return onPot(form) { it.copy(lookup = SpeciesAnswer(note = "type a species first")) }
         }
         onPot(form) { it.copy(lookingUp = true, lookup = null) }
-        viewModelScope.launch {
+        flight {
             val answer =
                 try {
                     withContext(Dispatchers.IO) { backend.species(normaliseSpecies(typed)) }
@@ -617,7 +815,7 @@ class GardenViewModel(
             )
         }
         onPot(parent) { it.copy(saving = true, note = null) }
-        viewModelScope.launch {
+        flight {
             val refusal =
                 try {
                     arm(parent, id, name)
@@ -672,7 +870,7 @@ class GardenViewModel(
         val id = (shown.value as? Screen.Calibrate)?.parent?.id ?: return
         if (polling?.isActive == true) return
         polling =
-            viewModelScope.launch {
+            flight {
                 val fetched =
                     try {
                         withContext(Dispatchers.IO) { backend.pots() to backend.health() }
@@ -712,7 +910,7 @@ class GardenViewModel(
         // numbers are the whole edit. Resending the nickname it opened with
         // would undo a rename made anywhere else in that time.
         val body = potBody(parent.id, null, mapOf("dry_raw" to "${s.dry}", "wet_raw" to "${s.wet}"))
-        viewModelScope.launch {
+        flight {
             val outcome =
                 try {
                     withContext(Dispatchers.IO) { backend.postPot(body) }
@@ -735,7 +933,7 @@ class GardenViewModel(
         val parent = wizard.parent
         val controller = calController
         val prevNextS = wizard.cal.prevNextS
-        viewModelScope.launch {
+        flight {
             val failure =
                 try {
                     if (controller != null) {
@@ -758,7 +956,7 @@ class GardenViewModel(
 
     /** The backend's answer, or its refusal, lands where the user is looking. */
     private fun act(call: () -> String, land: (String) -> Unit) {
-        viewModelScope.launch {
+        flight {
             val text =
                 try {
                     withContext(Dispatchers.IO) { call() }
@@ -793,11 +991,16 @@ class GardenViewModel(
         /** The only thing the Android side has to build: everything else
          * about this view model is defaulted, so the JVM tests keep using
          * the plain constructor. */
-        fun factory(cache: GardenCache) =
+        fun factory(cache: GardenCache, settings: ConfigStore) =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    GardenViewModel(cache = cache) as T
+                    // No address yet: the stored one is read first, and the
+                    // backend is pointed at it (or the setup screen asks)
+                    // before anything goes on the wire. A build constant
+                    // here would be a request to whatever the APK was built
+                    // against, before the user's own answer was even read.
+                    GardenViewModel(Backend(), cache = cache, settings = settings) as T
             }
     }
 
