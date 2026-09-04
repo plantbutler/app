@@ -28,11 +28,11 @@ class WaterTest {
     }
 
     @Test
-    fun `a disabled pot refuses before anything else`() {
-        val disabled = ready.copy(enabled = 0, proposal = Proposal(9, 100))
+    fun `a buried pot refuses before anything else`() {
+        val buried = ready.copy(status = GRAVEYARD, proposal = Proposal(9, 100))
         assertEquals(
-            "this pot is disabled — enable it in the form first",
-            cannotWater(disabled, controller(command = InFlight(3, state = "sent")), 1000, 60, emptySet()),
+            "this pot is in the graveyard — bring it back in the form first",
+            cannotWater(buried, controller(command = InFlight(3, state = "sent")), 1000, 60, emptySet()),
         )
     }
 

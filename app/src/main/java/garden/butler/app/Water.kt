@@ -30,7 +30,9 @@ fun cannotWater(
     // them would be watering a reading nobody has confirmed, and every
     // check below is being made against a garden that may have moved.
     if (cachedAtS != null) return staleLine(cachedAtS, nowS)
-    if (pot.enabled != 1) return "this pot is disabled — enable it in the form first"
+    if (pot.status != ALIVE) {
+        return "this pot is in the graveyard — bring it back in the form first"
+    }
     val c = pot.controller
     if (c == null || pot.outlet == null) return "map a controller and an outlet first"
     if (pot.doseMl == null) return "set a dose in the form first"

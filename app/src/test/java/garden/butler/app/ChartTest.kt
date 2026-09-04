@@ -13,7 +13,7 @@ private fun point(ts: Long, raw: Long, n: Int = 1) = HistoryPoint(ts, raw, n = n
 private fun controller(nextS: Int? = null) = ControllerHealth("b1", lastSeen = 1000, nextS = nextS)
 
 private fun history(bucketS: Int = 300, hours: Long = 24, vararg points: HistoryPoint) =
-    History("b1", 0, since = 2_000_000 - hours * 3600, to = 2_000_000, bucketS = bucketS, points = points.toList())
+    History("pot-1", since = 2_000_000 - hours * 3600, to = 2_000_000, bucketS = bucketS, points = points.toList())
 
 private val zurich = ZoneId.of("Europe/Zurich")
 

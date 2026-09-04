@@ -122,7 +122,10 @@ data class Pot(
     val mode: String = "manual",
     @SerialName("cooldown_h") val cooldownH: Int? = null,
     @SerialName("daily_cap_ml") val dailyCapMl: Int? = null,
-    val enabled: Int = 1,
+    /** alive | graveyard, and a word this build may not know: the app
+     * tests `== "alive"`, never `!= "graveyard"`, so a status a newer
+     * backend invents lands in the aside rather than in the watering list. */
+    val status: String = "alive",
     val raw: Long? = null,
     val pct: Int? = null,
     @SerialName("read_ts") val readTs: Long? = null,
@@ -253,8 +256,7 @@ data class HistoryPoint(
 
 @Serializable
 data class History(
-    val controller: String = "",
-    val channel: Int = 0,
+    val pot: String = "",
     val since: Long = 0,
     /** The server's clock when it answered: the chart's right edge. */
     val to: Long = 0,
@@ -434,6 +436,11 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
 
     fun deletePhoto(photoId: String): String = post("/photo/delete", "photo=$photoId")
 
+    /** Erases a pot and everything of its. Its own route on the backend so
+     * a save that lost its body cannot become one; there is no undo, which
+     * is why the screen asks first. */
+    fun deletePot(potId: String): String = post("/pot/delete", "id=$potId")
+
     /** This offer was seen and refused. There is no accept — accepting is
      * postPot() with the numbers, like any other edit. */
     fun dismissAdvice(potId: String): String = post("/advice", "pot=$potId dismiss=1")
@@ -460,9 +467,11 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
 
     /** Bucketed raw counts for one sensor over the last `hours`. The name is
      * a single token on the wire but not necessarily a URL-safe one. */
-    fun history(controller: String, channel: Int, hours: Int, bucketS: Int): History {
-        val c = URLEncoder.encode(controller, "UTF-8")
-        return parseHistory(get("/history?c=$c&ch=$channel&hours=$hours&bucket_s=$bucketS"))
+    /** The chart, by pot. Encoded like doses()' `pot=` and for the same
+     * reason: the two must not disagree about what an id looks like. */
+    fun history(potId: String, hours: Int, bucketS: Int): History {
+        val pot = URLEncoder.encode(potId, "UTF-8")
+        return parseHistory(get("/history?pot=$pot&hours=$hours&bucket_s=$bucketS"))
     }
 
     /** Queues one dose through the hand-off; the backend sizes the cap

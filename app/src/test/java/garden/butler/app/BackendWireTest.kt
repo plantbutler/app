@@ -184,24 +184,27 @@ class BackendWireTest {
         withServer { server, backend ->
             server.enqueue(
                 MockResponse().setBody(
-                    """{"controller": "b1", "channel": 0, "since": 1788205474, "to": 1788291874,
+                    """{"pot": "pot-3f9a21", "since": 1788205474, "to": 1788291874,
                        "bucket_s": 300, "points": [{"ts": 1788205500, "raw": 8123, "n": 5}]}""",
                 ),
             )
-            val history = backend.history("b1", 0, 24, 300)
+            val history = backend.history("pot-3f9a21", 24, 300)
             val sent = server.takeRequest()
             assertEquals("GET", sent.method)
-            assertEquals("/history?c=b1&ch=0&hours=24&bucket_s=300", sent.path)
+            assertEquals("/history?pot=pot-3f9a21&hours=24&bucket_s=300", sent.path)
             assertEquals(1788291874, history.to)
             assertEquals(listOf(HistoryPoint(1788205500, 8123, n = 5)), history.points)
         }
 
     @Test
-    fun `history percent-encodes the controller's name`() =
+    fun `history percent-encodes the pot id, as doses does`() =
         withServer { server, backend ->
-            server.enqueue(MockResponse().setBody("""{"controller": "b+1", "points": []}"""))
-            backend.history("b+1", 0, 24, 300)
-            assertEquals("/history?c=b%2B1&ch=0&hours=24&bucket_s=300", server.takeRequest().path)
+            // A minted `pot-xxxxxx` carries nothing to encode, so the encoder
+            // is here for the same reason doses' is: the two readers must
+            // agree about what an id looks like, and neither gets to assume.
+            server.enqueue(MockResponse().setBody("""{"pot": "a+b", "points": []}"""))
+            backend.history("a+b", 24, 300)
+            assertEquals("/history?pot=a%2Bb&hours=24&bucket_s=300", server.takeRequest().path)
         }
 
     @Test

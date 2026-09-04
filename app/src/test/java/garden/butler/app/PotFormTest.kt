@@ -19,7 +19,7 @@ private val basil =
         wetRaw = 4000,
         targetLowPct = 30,
         mode = "learning",
-        enabled = 1,
+        status = ALIVE,
         raw = 8123,
         pct = 48,
         readTs = 1788291874,
@@ -29,14 +29,14 @@ private val basil =
 
 class PotFormTest {
     @Test
-    fun `wire fields render ints and enabled, omit nulls, never leak the rest`() {
+    fun `wire fields render ints and the status, omit nulls, never leak the rest`() {
         val fields = wireFields(basil)
         assertEquals("b1", fields["controller"])
         assertEquals("0", fields["channel"])
         assertEquals("12000", fields["dry_raw"])
         assertEquals("30", fields["target_low_pct"])
         assertEquals("learning", fields["mode"])
-        assertEquals("1", fields["enabled"])
+        assertEquals("alive", fields["status"])
         assertFalse("target_high_pct" in fields)
         assertFalse("soil" in fields)
         for (key in listOf("name", "raw", "pct", "read_ts", "proposal", "last_dose")) {
@@ -46,9 +46,12 @@ class PotFormTest {
     }
 
     @Test
-    fun `a bare pot still says its mode and that it is enabled`() {
-        assertEquals(mapOf("mode" to "manual", "enabled" to "1"), wireFields(Pot(name = "new")))
-        assertEquals("0", wireFields(Pot(name = "off", enabled = 0))["enabled"])
+    fun `a bare pot still says its mode and that it is alive`() {
+        assertEquals(mapOf("mode" to "manual", "status" to "alive"), wireFields(Pot(name = "new")))
+        assertEquals(
+            "graveyard",
+            wireFields(Pot(name = "gone", status = GRAVEYARD))["status"],
+        )
     }
 
     @Test
@@ -187,12 +190,12 @@ class PotFormTest {
     }
 
     @Test
-    fun `a name is taken as it would travel, across enabled, disabled and env pots`() {
+    fun `a name is taken as it would travel, across living, buried and env pots`() {
         val garden =
             Garden(
                 pots = listOf(basil),
                 env = listOf(Pot(id = "pot-env", name = "env:temp")),
-                disabled = listOf(Pot(id = "pot-thai", name = "Thai_basil", enabled = 0)),
+                graveyard = listOf(Pot(id = "pot-thai", name = "Thai_basil", status = GRAVEYARD)),
                 problems = emptyList(),
                 health = Health(),
             )
@@ -210,7 +213,7 @@ class PotFormTest {
             Garden(
                 pots = listOf(basil),
                 env = emptyList(),
-                disabled = listOf(Pot(id = "pot-thai", name = "Thai_basil", enabled = 0)),
+                graveyard = listOf(Pot(id = "pot-thai", name = "Thai_basil", status = GRAVEYARD)),
                 problems = emptyList(),
                 health = Health(),
             )
@@ -226,13 +229,17 @@ class PotFormTest {
             listOf(
                 "controller", "channel", "outlet", "species", "plant_type", "plant_height_cm",
                 "pot_diameter_cm", "soil", "dry_raw", "wet_raw", "target_low_pct",
-                "target_high_pct", "dose_ml", "cooldown_h", "daily_cap_ml", "mode", "enabled",
+                "target_high_pct", "dose_ml", "cooldown_h", "daily_cap_ml", "mode", "status",
             ),
             POT_FIELDS.map { it.key },
         )
         assertEquals("target low %", POT_FIELDS.first { it.key == "target_low_pct" }.label)
         assertEquals(Input.INTEGER, POT_FIELDS.first { it.key == "dose_ml" }.input)
         assertEquals(Input.TEXT, POT_FIELDS.first { it.key == "mode" }.input)
+        // Three closed sets, so three dropdowns rather than three boxes.
+        for (key in listOf("plant_type", "soil", "status")) {
+            assertEquals(Input.PICK, POT_FIELDS.first { it.key == key }.input, key)
+        }
         // A measurement wants a keyboard with a point on it.
         assertEquals(Input.DECIMAL, POT_FIELDS.first { it.key == "pot_diameter_cm" }.input)
     }
@@ -267,30 +274,59 @@ class PotFormTest {
 
     @Test
     fun `the kinds are the ones the backend accepts`() {
-        // Six wire words, and they are the backend's, not the labels'. A
+        // Twelve wire words, and they are the backend's, not the labels'. A
         // label is free to change; one of these is a 400.
         assertEquals(
-            listOf("succulent", "fern", "herb", "vegetable", "tropical", "flower"),
+            listOf(
+                "cactus", "succulent", "orchid", "mediterranean", "bulb", "flower",
+                "herb", "palm", "tropical", "vegetable", "fern", "carnivorous",
+            ),
             PLANT_KINDS.map { it.wire },
         )
         assertTrue(PLANT_KINDS.all { it.label.isNotBlank() })
     }
 
     @Test
+    fun `the soils are a closed set too, and only the ones that move the range`() {
+        // An ordinary potting mix is deliberately absent: it is what the
+        // plant kinds are written against, so "not said" is the same answer.
+        assertEquals(
+            listOf("sphagnum", "peat", "clay", "sandy", "perlite", "cactus", "bark"),
+            SOIL_KINDS.map { it.wire },
+        )
+        assertTrue(SOIL_KINDS.none { it.wire == "potting" || it.wire == "loam" })
+    }
+
+    @Test
+    fun `a picked field shows a label and falls back to the raw word`() {
+        assertEquals("tropical foliage", labelFor("plant_type", "tropical"))
+        assertEquals("bark or orchid mix", labelFor("soil", "bark"))
+        assertEquals("graveyard", labelFor("status", "graveyard"))
+        assertEquals("", labelFor("plant_type", null))
+        // Written before these were sets, or by a backend newer than this
+        // build: it renders as itself rather than crashing the form.
+        assertEquals("basil", labelFor("plant_type", "basil"))
+        assertEquals("hibernating", labelFor("status", "hibernating"))
+        assertNull(choicesFor("species"))
+    }
+
+    @Test
     fun `a suggested kind fills an empty field and never overwrites one`() {
         val empty = mapOf("name" to "basil")
         assertEquals("herb", withKind(empty, "herb")["plant_type"])
-        // Somebody typed succulent. A guess read off a botanical family
+        // Somebody picked cactus. A guess read off a botanical family
         // does not get to overrule that; it is offered instead.
-        val answered = mapOf("plant_type" to "succulent")
-        assertEquals("succulent", withKind(answered, "herb")["plant_type"])
+        val answered = mapOf("plant_type" to "cactus")
+        assertEquals("cactus", withKind(answered, "herb")["plant_type"])
         assertEquals("herb", suggestedKind(answered, "herb"))
         // Nothing to offer when the field already agrees, or when the
         // lookup had no idea, or when it named something no chip shows.
+        // "moss" is not a kind and is not going to become one; "orchid"
+        // was the example here until it did.
         assertNull(suggestedKind(mapOf("plant_type" to "herb"), "herb"))
         assertNull(suggestedKind(empty, null))
-        assertNull(suggestedKind(empty, "orchid"))
-        assertEquals(empty, withKind(empty, "orchid"))
+        assertNull(suggestedKind(empty, "moss"))
+        assertEquals(empty, withKind(empty, "moss"))
     }
 
     @Test

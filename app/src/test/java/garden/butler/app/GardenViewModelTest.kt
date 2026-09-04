@@ -37,6 +37,7 @@ class GardenViewModelTest {
     private class Butler : Dispatcher() {
         val nowS = System.currentTimeMillis() / 1000
         val requests = CopyOnWriteArrayList<RecordedRequest>()
+        val deleted = CopyOnWriteArrayList<String>()
         @Volatile var nextS: Int? = null
         @Volatile var failPots = false
         @Volatile var potAnswer = MockResponse().setBody("pot=pot-1 name=basil\n")
@@ -83,7 +84,8 @@ class GardenViewModelTest {
                                   ${if (proposal) ", \"proposal\": {\"id\": 9, \"ml\": 100}" else ""}
                                   ${lastDose?.let { ", \"last_dose\": $it" } ?: ""}
                                   ${advice?.let { ", \"advice\": $it" } ?: ""}},
-                                 {"id": "pot-2", "name": "mint", "controller": "b1", "channel": 1, "mode": "learning"}
+                                 {"id": "pot-2", "name": "mint", "controller": "b1", "channel": 1, "mode": "learning"},
+                                 {"id": "pot-3", "name": "fern", "status": "graveyard"}
                                ]}""",
                         )
                     }
@@ -107,6 +109,10 @@ class GardenViewModelTest {
                     MockResponse().setBody("ok\n")
                 }
                 "/advice" -> MockResponse().setBody("ok\n")
+                "/pot/delete" -> {
+                    deleted += request.body.copy().readUtf8().trim().removePrefix("id=")
+                    MockResponse().setBody("ok\n")
+                }
                 "/interval" -> MockResponse().setBody("next=${request.body.copy().readUtf8().substringAfter("next=")}\n")
                 else ->
                     if (request.path?.startsWith("/photos") == true) {
@@ -794,13 +800,13 @@ class GardenViewModelTest {
         onMain { open("pot-1") }
         val day = waitFor("the day") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
         assertEquals(ChartWindow.DAY, day.window)
-        assertEquals("/history?c=b1&ch=0&hours=24&bucket_s=300", butler.histories().last().path)
+        assertEquals("/history?pot=pot-1&hours=24&bucket_s=300", butler.histories().last().path)
 
         onMain { setChartWindow(ChartWindow.MONTH) }
         val month = waitFor("the month") {
             (model.screen.value as? Screen.Pot)?.takeIf { it.window == ChartWindow.MONTH && it.history != null }
         }
-        assertEquals("/history?c=b1&ch=0&hours=720&bucket_s=3600", butler.histories().last().path)
+        assertEquals("/history?pot=pot-1&hours=720&bucket_s=3600", butler.histories().last().path)
         assertEquals(3600, month.history?.bucketS)
         // A month's shape drawn under a "day" chip would be a lie, so the
         // old curve goes before the new one arrives.
@@ -830,7 +836,7 @@ class GardenViewModelTest {
         onMain { refresh() }
         settled()
         waitFor("the reload") { butler.histories().lastOrNull()?.takeIf { it.path?.contains("hours=168") == true } }
-        assertEquals("/history?c=b1&ch=0&hours=168&bucket_s=1800", butler.histories().last().path)
+        assertEquals("/history?pot=pot-1&hours=168&bucket_s=1800", butler.histories().last().path)
     }
 
     @Test
@@ -966,6 +972,74 @@ class GardenViewModelTest {
     }
 
     @Test
+    fun `a new pot form opens with the controller filled in`() {
+        ready()
+        onMain { newPot() }
+        val form = model.screen.value as Screen.Pot
+        assertNull(form.id)
+        // The DRAFT only: prefilling `original` too would make it look
+        // unchanged and it would never be sent.
+        assertEquals("0", form.draft["controller"])
+        assertEquals(emptyMap(), form.original)
+    }
+
+    @Test
+    fun `an unwired pot still fetches its chart`() {
+        // The readings carry the pot they were taken for, so a pot with no
+        // controller and no channel — just back from the graveyard, say —
+        // has a curve. It used to return early and render nothing.
+        ready()
+        onMain { open("pot-3") }
+        waitFor("the curve") { butler.histories().firstOrNull() }
+        assertEquals("/history?pot=pot-3&hours=24&bucket_s=300", butler.histories().last().path)
+    }
+
+    @Test
+    fun `burying a pot sends only the status, and reviving sends only the status`() {
+        // Only: the backend refuses status=graveyard alongside any wiring
+        // key, because burying is what unwires.
+        ready()
+        onMain { bury("pot-1") }
+        val buried = waitFor("the burial") { butler.posts().firstOrNull() }
+        assertEquals("id=pot-1 status=graveyard", buried.body.copy().readUtf8())
+
+        onMain { revive("pot-3") }
+        val revived = waitFor("the revival") { butler.posts().getOrNull(1) }
+        assertEquals("id=pot-3 status=alive", revived.body.copy().readUtf8())
+    }
+
+    @Test
+    fun `deleting a pot posts the erasure and leaves the form`() {
+        ready()
+        onMain { open("pot-1") }
+        waitFor("the form") { model.screen.value as? Screen.Pot }
+        onMain { deletePot() }
+        waitFor("the erasure") { butler.deleted.firstOrNull() }
+        settled()
+        assertEquals(listOf("pot-1"), butler.deleted.toList())
+        // The form MUST be popped: PotScreen keeps rendering from its own
+        // snapshot when the pot vanishes, so staying would leave a working
+        // form whose Save posts an id that is gone.
+        assertEquals(Screen.List, model.screen.value)
+    }
+
+    @Test
+    fun `a delete is refused while the garden is a memory`() {
+        // The one irreversible thing here must not be the one thing allowed
+        // against numbers nobody has confirmed.
+        val cache = FakeCache(cached(listOf(cachedPot("stale")), Health(), butler.nowS - 7200))
+        model = withCache(cache)
+        onMain { openCache() }
+        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        onMain { open("pot-1") }
+        waitFor("the form") { model.screen.value as? Screen.Pot }
+        onMain { deletePot() }
+        settled()
+        assertEquals(emptyList(), butler.deleted.toList())
+        assertNotNull((model.screen.value as Screen.Pot).refused)
+    }
+
+    @Test
     fun `a live answer clears the stamp and is written back to the cache`() {
         val cache = FakeCache(cached(listOf(cachedPot("stale")), Health(), butler.nowS - 7200))
         model = withCache(cache)
@@ -975,7 +1049,9 @@ class GardenViewModelTest {
         val live = waitFor("the live garden") { (model.state.value as? UiState.Ready)?.takeIf { it.cachedAtS == null } }
         assertEquals(listOf("basil", "mint"), live.garden.pots.map { it.name })
         val written = cache.writes.last()
-        assertEquals(listOf("pot-1", "pot-2"), written.pots.map { it.id })
+        // Every pot the answer carried, buried ones included: splitting is
+        // a screen decision, and a cache holds the answer.
+        assertEquals(listOf("pot-1", "pot-2", "pot-3"), written.pots.map { it.id })
         assertEquals(true, written.atS >= butler.nowS)
     }
 
@@ -1082,12 +1158,12 @@ class GardenViewModelTest {
     }
 
     @Test
-    fun `opening a mapped pot fetches its last day onto the form`() {
+    fun `opening a pot fetches its last day onto the form`() {
         ready()
         onMain { open("pot-1") }
         val form = waitFor("the curve") { (model.screen.value as? Screen.Pot)?.takeIf { it.history != null } }
         val get = butler.requests.single { it.path?.startsWith("/history") == true }
-        assertEquals("/history?c=b1&ch=0&hours=24&bucket_s=300", get.path)
+        assertEquals("/history?pot=pot-1&hours=24&bucket_s=300", get.path)
         assertEquals("GET", get.method)
         val history = assertNotNull(form.history)
         assertEquals(butler.nowS - 86400, history.since)
@@ -1118,7 +1194,7 @@ class GardenViewModelTest {
         waitFor("the reload") { butler.histories().getOrNull(1) }
         Thread.sleep(200)
         assertEquals(2, butler.histories().size)
-        assertEquals("/history?c=b1&ch=0&hours=24&bucket_s=300", butler.histories()[1].path)
+        assertEquals("/history?pot=pot-1&hours=24&bucket_s=300", butler.histories()[1].path)
     }
 
     @Test

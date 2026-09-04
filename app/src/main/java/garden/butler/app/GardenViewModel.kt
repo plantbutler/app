@@ -319,7 +319,7 @@ class GardenViewModel(
     private fun rideRefresh(garden: Garden) {
         val form = shown.value as? Screen.Pot ?: return
         val pot = form.id?.let { garden.potById(it) } ?: return
-        loadHistory(form, pot)
+        loadHistory(form)
         if (form.waterRefused != null &&
             cannotWater(pot, controllerOf(pot.controller), nowS(), nextDefault(), emptySet()) == null
         ) {
@@ -346,7 +346,7 @@ class GardenViewModel(
         noteOnList.value = null
         val form = Screen.Pot(id, draft, draft)
         shown.value = form
-        loadHistory(form, pot)
+        loadHistory(form)
         loadPhotos(form)
     }
 
@@ -355,16 +355,18 @@ class GardenViewModel(
      * already up and says why beside it. Single-flight: a reload cancels
      * the one before it, and a cancelled flight lands nothing — not even
      * its failure over a newer curve. */
-    private fun loadHistory(form: Screen.Pot, pot: Pot) {
-        val controller = pot.controller ?: return
-        val channel = pot.channel ?: return
+    private fun loadHistory(form: Screen.Pot) {
+        // By pot, and gated on nothing else: the readings carry the pot they
+        // were taken for, so a pot that is currently unwired — brought back
+        // from the graveyard, or waiting to be replugged — still has a curve.
+        val id = form.id ?: return
         historyFlight?.cancel()
         historyFlight =
             flight {
                 try {
                     val history =
                         withContext(Dispatchers.IO) {
-                            backend.history(controller, channel, form.window.hours, form.window.bucketS)
+                            backend.history(id, form.window.hours, form.window.bucketS)
                         }
                     onPot(form) { it.copy(history = history, historyWhy = null) }
                 } catch (why: CancellationException) {
@@ -468,10 +470,9 @@ class GardenViewModel(
     fun setChartWindow(window: ChartWindow) {
         val form = shown.value as? Screen.Pot ?: return
         if (form.window == window) return
-        val pot = form.id?.let { currentPot(it) } ?: return
         val next = form.copy(window = window, history = null, historyWhy = null)
         shown.value = next
-        loadHistory(next, pot)
+        loadHistory(next)
     }
 
     private fun controllerOf(name: String?): ControllerHealth? =
@@ -547,7 +548,10 @@ class GardenViewModel(
     fun newPot() {
         if (!addressed) return
         noteOnList.value = null
-        shown.value = Screen.Pot(null, emptyMap(), emptyMap())
+        // The draft only, never `original`: prefilling both would make the
+        // controller look unchanged and never be sent. The cost is that the
+        // form opens dirty, so Back asks before dropping it.
+        shown.value = Screen.Pot(null, emptyMap(), mapOf("controller" to "0"))
     }
 
     /** Change the address or the token. The stored token goes into the
@@ -803,6 +807,53 @@ class GardenViewModel(
             // the refresh after it, either way, shows what the backend has.
             try {
                 withContext(Dispatchers.IO) { backend.postPot(body) }
+                shown.update { if (it is Screen.Pot && it.isForm(form)) Screen.List else it }
+            } catch (why: CancellationException) {
+                throw why
+            } catch (why: Exception) {
+                onPot(form) { it.copy(saving = false, refused = why.message ?: why.toString()) }
+            }
+            refresh()
+        }
+    }
+
+    /** Burying a pot and bringing it back, from the list's long-press sheet.
+     * One field, sent on its own: `status=graveyard` together with any
+     * wiring key is refused, and burying is what unwires. */
+    fun bury(id: String) = setStatus(id, GRAVEYARD)
+
+    fun revive(id: String) = setStatus(id, ALIVE)
+
+    private fun setStatus(id: String, status: String) {
+        if (!addressed) return
+        staleRefusal()?.let { why -> return noteOnList.update { why } }
+        flight {
+            try {
+                withContext(Dispatchers.IO) { backend.postPot("id=$id status=$status") }
+            } catch (why: CancellationException) {
+                throw why
+            } catch (why: Exception) {
+                noteOnList.value = why.message ?: why.toString()
+            }
+            refresh()
+        }
+    }
+
+    /** Erase the open pot. The screen asks first — this is only the send.
+     *
+     * Refused while the garden is a memory: the one irreversible thing here
+     * must not be the one thing allowed against numbers nobody confirmed.
+     * And the form is popped whatever happens next, because PotScreen keeps
+     * rendering from its own snapshot when the pot vanishes, so staying
+     * would leave a working form whose Save posts an id that is gone. */
+    fun deletePot() {
+        val form = shown.value as? Screen.Pot ?: return
+        val id = form.id ?: return
+        staleRefusal()?.let { why -> return onPot(form) { it.copy(refused = why) } }
+        onPot(form) { it.copy(saving = true, refused = null) }
+        flight {
+            try {
+                withContext(Dispatchers.IO) { backend.deletePot(id) }
                 shown.update { if (it is Screen.Pot && it.isForm(form)) Screen.List else it }
             } catch (why: CancellationException) {
                 throw why
