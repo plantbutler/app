@@ -411,6 +411,62 @@ class GardenViewModelTest {
     }
 
     @Test
+    fun `a lookup pre-selects the kind while the field is empty`() {
+        butler.speciesAnswer =
+            MockResponse().setBody(
+                """{"query": "basil", "matched": "exact", "accepted": "Ocimum basilicum",
+                    "kind": "herb", "care": {"found": true}, "candidates": [],
+                    "note": "Trefle: Ocimum basilicum"}""",
+            )
+        ready()
+        onMain {
+            open("pot-1")
+            edit("species", "basil")
+            lookUpSpecies()
+        }
+        waitFor("the lookup") { pot().lookup }
+        // The one route by which a species has ever reached the band: a
+        // dropdown a human can see and change, not a number in the math.
+        assertEquals("herb", pot().draft["plant_type"])
+    }
+
+    @Test
+    fun `a lookup never overwrites a kind somebody chose`() {
+        butler.speciesAnswer =
+            MockResponse().setBody(
+                """{"query": "basil", "matched": "exact", "accepted": "Ocimum basilicum",
+                    "kind": "herb", "care": {"found": true}, "candidates": [],
+                    "note": "Trefle: Ocimum basilicum"}""",
+            )
+        ready()
+        onMain {
+            open("pot-1")
+            edit("plant_type", "succulent")
+            edit("species", "basil")
+            lookUpSpecies()
+        }
+        waitFor("the lookup") { pot().lookup }
+        assertEquals("succulent", pot().draft["plant_type"])
+        // It is offered rather than applied, and taking it is a tap.
+        assertEquals("herb", suggestedKind(pot().draft, pot().lookup?.kind))
+        onMain { useKind("herb") }
+        assertEquals("herb", pot().draft["plant_type"])
+    }
+
+    @Test
+    fun `one field explains itself at a time`() {
+        ready()
+        onMain { open("pot-1") }
+        assertNull(pot().explaining)
+        onMain { explain("cooldown_h") }
+        assertEquals("cooldown_h", pot().explaining)
+        onMain { explain("mode") }
+        assertEquals("mode", pot().explaining)
+        onMain { stopExplaining() }
+        assertNull(pot().explaining)
+    }
+
+    @Test
     fun `a lookup with nothing typed asks nobody`() {
         ready()
         onMain {

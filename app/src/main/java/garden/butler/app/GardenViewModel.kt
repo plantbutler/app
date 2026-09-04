@@ -68,6 +68,8 @@ sealed interface Screen {
         val uploading: Boolean = false,
         /** The photograph shown full size over the form, by id. */
         val viewing: String? = null,
+        /** The field whose ⓘ is open, by wire key. */
+        val explaining: String? = null,
     ) : Screen
 
     data class Calibrate(val parent: Pot, val cal: CalState) : Screen
@@ -650,6 +652,18 @@ class GardenViewModel(
         shown.update { if (it is Screen.Setup) change(it) else it }
     }
 
+    /** Open one field's explanation, and close it again. State on the
+     * screen rather than in the composable, so it survives a rotation and a
+     * test can ask what is open without touching the view layer. */
+    fun explain(key: String) = onPot { it.copy(explaining = key) }
+
+    fun stopExplaining() = onPot { it.copy(explaining = null) }
+
+    /** Take the kind the lookup offered. A tap, because the field already
+     * held an answer somebody typed and a guess off a botanical family does
+     * not get to overwrite one. */
+    fun useKind(kind: String) = edit("plant_type", kind)
+
     fun edit(key: String, value: String) =
         onPot { it.copy(draft = it.draft + (key to value), refused = null, waterRefused = null) }
 
@@ -822,7 +836,16 @@ class GardenViewModel(
                         note = why.message ?: why.toString(),
                     )
                 }
-            onPot(form) { it.copy(lookingUp = false, lookup = answer) }
+            // The kind fills the dropdown only while it is empty. A form
+            // that already says herb is a human's answer and outranks a
+            // guess read off a family — that one arrives as a chip to tap.
+            onPot(form) {
+                it.copy(
+                    lookingUp = false,
+                    lookup = answer,
+                    draft = withKind(it.draft, answer.kind),
+                )
+            }
         }
     }
 

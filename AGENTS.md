@@ -24,6 +24,12 @@ state flows, pure functions for every decision, JVM tests only.
 3. **Manage the garden** — done (app#2). Names, thresholds, channel/valve/plant mapping,
    recalibration capture, controller health, approve/verdict. See "What is here".
 
+Since 2026-09-04 the form explains itself: an ⓘ beside every field opens a one-sentence dialog,
+`kind of plant` is a row of chips rather than free text (it is the base band, so a value that
+matched nothing used to cost twenty points silently), and the two sizes are measurements —
+`plant height (cm)` and `pot diameter (cm)` — which the backend reads as the demand on a water
+buffer and the buffer itself.
+
 Not in v1: login, Play Store, push via FCM, widgets, theming. Photographs of your own plants
 arrived on 2026-09-04: a pot keeps its own strip, oldest first, and the care source's picture of
 the species sits beside them as the reference. Offline is a read-only
@@ -48,6 +54,12 @@ is on screen. Nothing is queued to send later.
   `float=1 pos=ok`), `potById` (the key everything navigates by; an empty id is never a key)
   and `potNamed` (only the two places that have a name and not an id).
 - `PotForm.kt` — the form is one `Map<String,String>` draft diffed against the stored pot:
+  `POT_FIELDS` (key, label, keyboard, and the sentence behind the ⓘ — every field has one, since
+  seventeen boxes labelled in wire names is a form only its author can fill in), `PLANT_KINDS`
+  (the six words the backend accepts, and separately what to call them on screen: a label change
+  must never become a wire change), `withKind`/`suggestedKind` (a looked-up kind fills the field
+  only while it is empty; a kind already there is a human's answer and is offered a tap instead),
+  `cmText` (14.0 shows as 14, so opening a form does not make it dirty),
   `wireFields`, `tokenize` (Unicode whitespace → `_`, values are single words on the wire),
   `changedFields` (only what changed is posted — a partial upsert), `emptiedFields` (the wire
   cannot clear a field; the form says so and refuses to save), `potBody(id, name, changed)` (an
