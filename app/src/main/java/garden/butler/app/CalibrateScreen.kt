@@ -151,8 +151,12 @@ private fun Readings(instruction: String, cal: CalState, nowS: Long) {
     val newest = seen.firstOrNull()
     Text(newest?.raw?.toString() ?: "—", style = MaterialTheme.typography.displayMedium)
     Small(newest?.let { agoText(it.readTs, nowS) } ?: "waiting for a report")
-    if (seen.isNotEmpty()) Small(seen.joinToString(" · ") { "${it.raw}" })
+    // The strip is the samples a tap would take, not every report polled:
+    // just after the dry end is captured, the reports that served it are
+    // still in `seen` but are deliberately not eligible for the wet one, and
+    // showing them beside a count that excludes them reads like a bug.
     val samples = tapSamples(cal)
+    if (samples.isNotEmpty()) Small(samples.joinToString(" · ") { "${it.raw}" })
     Small(settleLine(samples.size))
 }
 
