@@ -12,13 +12,13 @@ class BackendTest {
             """
             {"pots": [
               {"id": "pot-3f9a21", "name": "basil", "species": "Ocimum_basilicum",
-               "controller": "b1", "channel": 0,
+               "controller": 0, "channel": 0,
                "outlet": 3, "plant_type": "basil", "dry_raw": 12000,
                "wet_raw": 4000, "mode": "auto", "enabled": 1,
                "raw": 8123, "pct": 48, "read_ts": 1788291874,
                "proposal": {"id": 17, "ml": 100, "cap_s": 10, "created_ts": 1},
                "brand_new_key": true},
-              {"id": "pot-7c1b04", "name": "env:temp", "controller": "b1", "channel": 5,
+              {"id": "pot-7c1b04", "name": "env:temp", "controller": 0, "channel": 5,
                "mode": "manual", "enabled": 1, "raw": 231, "pct": null,
                "read_ts": 1788291874, "proposal": null}
             ]}
@@ -44,7 +44,7 @@ class BackendTest {
         val body =
             """
             {"ok": true, "readings": 42, "last_ts": 1788291874,
-             "controllers": [{"controller": "b1", "last_seen": 1788291874,
+             "controllers": [{"controller": 0, "last_seen": 1788291874,
                "next_s": null, "command": {"id": 3, "kind": "water",
                "state": "sent"}, "float": 1, "pos": "ok"}],
              "alerts": [{"key": "silent:b2", "raised_ts": 1788290000}]}
@@ -68,7 +68,7 @@ class BackendTest {
         val body =
             """
             {"pots": [{"id": "pot-3f9a21", "name": "basil", "species": "Ocimum_basilicum",
-              "controller": "b1", "channel": 0,
+              "controller": 0, "channel": 0,
               "outlet": 3, "plant_type": "herb", "plant_height_cm": 21,
               "pot_diameter_cm": 12.5, "soil": "loam", "dry_raw": 12000, "wet_raw": 4000,
               "target_low_pct": 30, "target_high_pct": 60, "dose_ml": 100,
@@ -116,7 +116,7 @@ class BackendTest {
         val body =
             """
             {"ok": true, "next_default": 30,
-             "controllers": [{"controller": "b1", "last_seen": 5,
+             "controllers": [{"controller": 0, "last_seen": 5,
                "command": {"id": 17, "kind": "stop", "state": "queued"}}]}
             """.trimIndent()
 

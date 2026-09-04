@@ -33,7 +33,7 @@ fun cannotWater(
     if (pot.status != ALIVE) {
         return "this pot is in the graveyard — bring it back in the form first"
     }
-    val c = pot.controller
+    val c = pot.controller?.let { boardName(it) }
     if (c == null || pot.outlet == null) return "map a controller and an outlet first"
     if (pot.doseMl == null) return "set a dose in the form first"
     if (dirtyKeys.any { it in WATER_KEYS }) {
@@ -123,5 +123,6 @@ fun staleLine(cachedAtS: Long, nowS: Long): String =
  * that has not happened is noise, and the status line under the button says
  * so if and when it does. */
 fun waterDialogText(pot: Pot): String =
-    "Water ${pot.name} with ${pot.doseMl ?: "?"} ml on ${pot.controller ?: "?"} outlet " +
+    "Water ${pot.name} with ${pot.doseMl ?: "?"} ml on " +
+        "${pot.controller?.let { boardName(it) } ?: "?"} outlet " +
         "${pot.outlet ?: "?"}? Counts as today's watering."

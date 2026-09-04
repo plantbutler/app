@@ -24,13 +24,13 @@ private fun saving() = CalState.Saving(prevNextS = null, freshS = FRESH_FAST_S, 
 private fun stalled() = CalState.Stalled(prevNextS = null, lastReadTs = 990, timeoutS = 150)
 
 private fun pot(
-    controller: String? = "b1",
+    controller: Int? = 0,
     channel: Int? = 0,
     mode: String = "manual",
 ) = Pot(name = "basil", controller = controller, channel = channel, mode = mode)
 
 private fun health(lastSeen: Long = 990, nextS: Int? = null) =
-    ControllerHealth("b1", lastSeen = lastSeen, nextS = nextS)
+    ControllerHealth(0, lastSeen = lastSeen, nextS = nextS)
 
 class CalibrationTest {
     @Test
@@ -386,10 +386,10 @@ class CalibrationTest {
             "set the pot to manual first — the rules would water a sensor held in the air",
             canCalibrate(pot(mode = "learning"), null, 1000, 60),
         )
-        assertEquals("b1 has never reported", canCalibrate(pot(), null, 1000, 60))
-        assertEquals("b1 has never reported", canCalibrate(pot(), health(lastSeen = 0), 1000, 60))
+        assertEquals("board 0 has never reported", canCalibrate(pot(), null, 1000, 60))
+        assertEquals("board 0 has never reported", canCalibrate(pot(), health(lastSeen = 0), 1000, 60))
         assertEquals(
-            "b1 is silent (last reported 11min ago)",
+            "board 0 is silent (last reported 11min ago)",
             canCalibrate(pot(), health(lastSeen = 300), 1000, 60),
         )
     }
@@ -399,7 +399,7 @@ class CalibrationTest {
         assertNull(canCalibrate(pot(), health(lastSeen = 300, nextS = 300), 1000, 60))
         assertNull(canCalibrate(pot(), health(lastSeen = 300), 1000, 300))
         assertEquals(
-            "b1 is silent (last reported 15min ago)",
+            "board 0 is silent (last reported 15min ago)",
             canCalibrate(pot(), health(lastSeen = 50, nextS = 300), 1000, 60),
         )
     }

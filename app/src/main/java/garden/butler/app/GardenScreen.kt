@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -42,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -135,7 +137,7 @@ private fun GardenList(
                 item { EnvCard(garden.env, nowS, model::open) }
             }
             items(garden.pots, key = { potKey(it) }) { pot ->
-                PotRow(pot, nowS, model::open) { sheetFor = pot }
+                PotRow(pot, nowS, model, model::open) { sheetFor = pot }
             }
             if (garden.pots.isEmpty() && garden.graveyard.isEmpty() && garden.env.isEmpty()) {
                 item {
@@ -156,7 +158,7 @@ private fun GardenList(
                 }
                 items(garden.graveyard, key = { "off:" + potKey(it) }) { pot ->
                     Box(Modifier.alpha(0.6f)) {
-                        PotRow(pot, nowS, model::open) { sheetFor = pot }
+                        PotRow(pot, nowS, model, model::open) { sheetFor = pot }
                     }
                 }
             }
@@ -214,7 +216,7 @@ private fun ProblemStrip(problems: List<String>) {
 /** One line per controller; a leftover interval override (a wizard that
  * could not restore it) gets its reset here. */
 @Composable
-private fun ControllersCard(health: Health, nowS: Long, live: Boolean, reset: (String) -> Unit) {
+private fun ControllersCard(health: Health, nowS: Long, live: Boolean, reset: (Int) -> Unit) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             health.controllers.forEach { c ->
@@ -312,9 +314,29 @@ private fun RowActions(pot: Pot, model: GardenViewModel, dismiss: () -> Unit) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PotRow(pot: Pot, nowS: Long, open: (String) -> Unit, longPress: () -> Unit) {
+private fun PotRow(
+    pot: Pot,
+    nowS: Long,
+    model: GardenViewModel,
+    open: (String) -> Unit,
+    longPress: () -> Unit,
+) {
     ListItem(
         modifier = Modifier.combinedClickable(onClick = { open(pot.id) }, onLongClick = longPress),
+        // The newest picture, small, so a list of names becomes a list of
+        // plants. A pot that has never been photographed gets no placeholder:
+        // an empty grey square in every row is noise, and the rows simply
+        // start at the name as they always did.
+        leadingContent =
+            pot.photo?.let { photoId ->
+                {
+                    Picture(
+                        photoId,
+                        model,
+                        Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
+                    )
+                }
+            },
         headlineContent = { Text(pot.name) },
         supportingContent = {
             Column {

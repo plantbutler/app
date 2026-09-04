@@ -10,6 +10,11 @@ const val ENV_PREFIX = "env:"
 const val ALIVE = "alive"
 const val GRAVEYARD = "graveyard"
 
+/** What a new pot's controller box starts at. There is one board, and its
+ * number is 0 — an integer since backend 0.17.0, and a real board despite
+ * being falsy, which is why nothing anywhere tests a controller for truth. */
+const val DEFAULT_CONTROLLER = "0"
+
 data class Garden(
     val pots: List<Pot>,
     val env: List<Pot>,
@@ -69,11 +74,11 @@ fun problems(health: Health, nowS: Long): List<String> {
     for (c in health.controllers) {
         val threshold = silentAfterS(c.nextS, health.nextDefault)
         if (c.lastSeen == 0L) {
-            found += "${c.controller} has never reported"
+            found += "${boardName(c.controller)} has never reported"
         } else if (
             nowS - c.lastSeen > threshold && "silent:${c.controller}" !in raised
         ) {
-            found += "${c.controller} last reported ${agoText(c.lastSeen, nowS)}"
+            found += "${boardName(c.controller)} last reported ${agoText(c.lastSeen, nowS)}"
         }
         if (c.float == 0 && "float:${c.controller}" !in raised) {
             found += "reservoir empty on ${c.controller}"
@@ -85,18 +90,25 @@ fun problems(health: Health, nowS: Long): List<String> {
     return found
 }
 
+/** A board as a person reads it. The controller is an integer on the wire,
+ * and a bare "0 has gone silent" reads like a truncated sentence. */
+fun boardName(controller: Int): String = "board $controller"
+
 fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
     val parts = key.split(":")
     val since = if (raisedTs in 1..nowS) " (${agoText(raisedTs, nowS)})" else ""
+    // The key's controller half is whatever the backend put there. It is a
+    // number today, but this reads keys and does not parse them, so an
+    // unrecognised shape still renders instead of throwing.
+    fun board(i: Int) = parts.getOrNull(i)?.let { "board $it" } ?: "?"
     return when (parts[0]) {
-        "silent" -> "${parts.getOrElse(1) { "?" }} has gone silent$since"
-        "float" -> "reservoir empty on ${parts.getOrElse(1) { "?" }}$since"
-        "pos" -> "${parts.getOrElse(1) { "?" }} lost its manifold position$since"
+        "silent" -> "${board(1)} has gone silent$since"
+        "float" -> "reservoir empty on ${board(1)}$since"
+        "pos" -> "${board(1)} lost its manifold position$since"
         "sensor" ->
-            "sensor ch${parts.getOrElse(2) { "?" }} on ${parts.getOrElse(1) { "?" }} " +
-                "stopped reporting$since"
+            "sensor ch${parts.getOrElse(2) { "?" }} on ${board(1)} stopped reporting$since"
         "fields" ->
-            "${parts.getOrElse(2) { "?" }} stopped sending ${parts.getOrElse(1) { "?" }}=$since"
+            "${board(2)} stopped sending ${parts.getOrElse(1) { "?" }}=$since"
         else -> key
     }
 }
@@ -147,8 +159,10 @@ fun envEntry(pot: Pot): Pair<String, String> {
     return pot.name.removePrefix(ENV_PREFIX) to value
 }
 
-/** One line per controller on the health list: "b1 · seen 40s ago · every
- * 60s · float ok · pos ok", plus the command in flight when there is one. */
+/** One line per controller on the health list: "board 0 · seen 40s ago ·
+ * every 60s · float ok · pos ok", plus the command in flight when there is
+ * one. The number is spelt "board 0" wherever a person reads it: bare, an
+ * integer controller reads like a stray digit. */
 fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
     val seen = if (c.lastSeen == 0L) "never reported" else "seen ${agoText(c.lastSeen, nowS)}"
     val every = c.nextS?.let { "every ${it}s (override)" } ?: "every ${defaultNextS}s"
@@ -159,7 +173,7 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
             else -> "float ok"
         }
     val pos = c.pos?.let { "pos $it" } ?: "pos ?"
-    val parts = mutableListOf(c.controller, seen, every, float, pos)
+    val parts = mutableListOf(boardName(c.controller), seen, every, float, pos)
     c.command?.let { cmd ->
         val kind = if (cmd.kind == "water") "" else " ${cmd.kind}"
         parts += "cmd ${cmd.id}$kind ${cmd.state}"

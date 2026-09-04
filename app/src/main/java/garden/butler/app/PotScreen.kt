@@ -281,7 +281,7 @@ private fun Erase(potId: String, name: String, live: Boolean, model: GardenViewM
 private fun draftPot(draft: Map<String, String>, stored: Pot?): Pot =
     (stored ?: Pot(name = "")).copy(
         species = draft["species"]?.ifBlank { null },
-        controller = draft["controller"]?.ifBlank { null },
+        controller = draft["controller"]?.toIntOrNull(),
         channel = draft["channel"]?.toIntOrNull(),
         outlet = draft["outlet"]?.toIntOrNull(),
         dryRaw = draft["dry_raw"]?.toLongOrNull(),
@@ -450,7 +450,9 @@ private fun WaterRow(screen: Screen.Pot, pot: Pot, reason: String?, model: Garde
         Button(onClick = { askWater = true }, enabled = reason == null && !screen.saving && !following) {
             Text(pot.doseMl?.let { "Water $it ml" } ?: "Water")
         }
-        status?.let { Text(waterLine(it, pot.controller ?: "?"), style = MaterialTheme.typography.bodySmall) }
+        status?.let {
+            Text(waterLine(it, pot.controller?.toString() ?: "?"), style = MaterialTheme.typography.bodySmall)
+        }
         if (reason != null && !ownWords) Text(reason, style = MaterialTheme.typography.bodySmall)
         screen.waterRefused?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -490,7 +492,7 @@ private fun DoseCard(d: LastDose, nowS: Long, enabled: Boolean, verdict: (String
 @Composable
 private fun Form(
     screen: Screen.Pot,
-    controllers: List<String>,
+    controllers: List<Int>,
     collision: Boolean,
     dirty: Boolean,
     live: Boolean,
@@ -554,7 +556,10 @@ private fun Form(
                 ValueField(field, draft, model::edit, model)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     controllers.forEach { c ->
-                        AssistChip(onClick = { model.edit("controller", c) }, label = { Text(c) })
+                        AssistChip(
+                            onClick = { model.edit("controller", c.toString()) },
+                            label = { Text(c.toString()) },
+                        )
                     }
                 }
             }

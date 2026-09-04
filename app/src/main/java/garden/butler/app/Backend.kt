@@ -107,7 +107,10 @@ data class Pot(
     /** A nickname, editable, unique among pots — not the identity. */
     val name: String,
     val species: String? = null,
-    val controller: String? = null,
+    /** The board's own number, 0..255. An integer since backend 0.17.0, and
+     * board 0 is a real board — the one a new pot is filled in with — so
+     * nothing here may test it for truthiness. */
+    val controller: Int? = null,
     val channel: Int? = null,
     val outlet: Int? = null,
     @SerialName("plant_type") val plantType: String? = null,
@@ -131,6 +134,11 @@ data class Pot(
     @SerialName("read_ts") val readTs: Long? = null,
     val proposal: Proposal? = null,
     @SerialName("last_dose") val lastDose: LastDose? = null,
+    /** The newest picture's id, for the thumbnail beside the name. Null
+     * until this pot has been photographed. The bytes come from
+     * GET /photo/<id> like every other picture, so this costs one cached
+     * fetch per row and nothing on the garden answer itself. */
+    val photo: String? = null,
     val advice: Advice? = null,
     val care: Care? = null,
 )
@@ -216,7 +224,7 @@ data class InFlight(
 
 @Serializable
 data class ControllerHealth(
-    val controller: String,
+    val controller: Int,
     @SerialName("last_seen") val lastSeen: Long = 0,
     @SerialName("next_s") val nextS: Int? = null,
     val float: Int? = null,
@@ -477,12 +485,12 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
     /** Queues one dose through the hand-off; the backend sizes the cap
      * from the dose itself. Answers the command id, or throws Refused —
      * "busy: cmd=N state=S" while the controller's one slot is taken. */
-    fun water(controller: String, outlet: Int, ml: Int): Long? =
+    fun water(controller: Int, outlet: Int, ml: Int): Long? =
         parseCmdAnswer(post("/command", "c=$controller water=$outlet ml=$ml"))
 
     /** Sets (or with 0 clears) the controller's report interval; returns the
      * effective interval the backend answered with. */
-    fun interval(controller: String, nextS: Int): Int? =
+    fun interval(controller: Int, nextS: Int): Int? =
         parseNextAnswer(post("/interval", "c=$controller next=$nextS"))
 
     private companion object {

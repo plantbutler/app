@@ -91,9 +91,10 @@ val POT_FIELDS: List<Field> =
         Field(
             "controller",
             "controller",
-            Input.TEXT,
-            "Which board reports this pot. One board carries several pots; this is the " +
-                "name it sends as c= in every report.",
+            Input.INTEGER,
+            "Which board reports this pot, by number. One board carries several pots; this " +
+                "is the number it sends as c= in every report, and there is one board, so " +
+                "0 is almost certainly right.",
         ),
         Field(
             "channel",

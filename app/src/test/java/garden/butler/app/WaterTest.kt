@@ -7,13 +7,13 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private val ready =
-    Pot(name = "basil", controller = "b1", channel = 0, outlet = 3, doseMl = 100)
+    Pot(name = "basil", controller = 0, channel = 0, outlet = 3, doseMl = 100)
 
 private fun controller(
     lastSeen: Long = 990,
     nextS: Int? = null,
     command: InFlight? = null,
-) = ControllerHealth("b1", lastSeen = lastSeen, nextS = nextS, command = command)
+) = ControllerHealth(0, lastSeen = lastSeen, nextS = nextS, command = command)
 
 private fun dose(id: Long, state: String, flowMl: Int? = null) =
     LastDose(id, ml = 100, flowMl = flowMl, state = state)
@@ -63,10 +63,10 @@ class WaterTest {
     @Test
     fun `a board that never reported or went silent refuses before the slot`() {
         val busy = InFlight(3, state = "sent")
-        assertEquals("b1 has never reported", cannotWater(ready, null, 1000, 60, emptySet()))
-        assertEquals("b1 has never reported", cannotWater(ready, controller(lastSeen = 0, command = busy), 1000, 60, emptySet()))
+        assertEquals("board 0 has never reported", cannotWater(ready, null, 1000, 60, emptySet()))
+        assertEquals("board 0 has never reported", cannotWater(ready, controller(lastSeen = 0, command = busy), 1000, 60, emptySet()))
         assertEquals(
-            "b1 is silent (last reported 11min ago)",
+            "board 0 is silent (last reported 11min ago)",
             cannotWater(ready, controller(lastSeen = 1000 - 661, command = busy), 1000, 60, emptySet()),
         )
         assertNull(cannotWater(ready, controller(lastSeen = 1000 - 600), 1000, 60, emptySet()))
@@ -77,11 +77,11 @@ class WaterTest {
     fun `a taken slot refuses before a waiting proposal`() {
         val proposed = ready.copy(proposal = Proposal(9, 100))
         assertEquals(
-            "busy: cmd 3 sent on b1",
+            "busy: cmd 3 sent on board 0",
             cannotWater(proposed, controller(command = InFlight(3, state = "sent")), 1000, 60, emptySet()),
         )
         assertEquals(
-            "busy: cmd 4 queued on b1",
+            "busy: cmd 4 queued on board 0",
             cannotWater(ready, controller(command = InFlight(4)), 1000, 60, emptySet()),
         )
         assertEquals(
@@ -191,7 +191,7 @@ class WaterTest {
     @Test
     fun `the confirmation names the pot, the dose and where it goes`() {
         assertEquals(
-            "Water basil with 100 ml on b1 outlet 3? Counts as today's watering.",
+            "Water basil with 100 ml on board 0 outlet 3? Counts as today's watering.",
             waterDialogText(ready),
         )
         // No warning about a failure that has not happened: the dose's own

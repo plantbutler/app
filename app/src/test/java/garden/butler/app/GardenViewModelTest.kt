@@ -78,14 +78,15 @@ class GardenViewModelTest {
                     } else {
                         MockResponse().setBody(
                             """{"pots": [
-                                 {"id": "pot-1", "name": "basil", "controller": "b1", "channel": 0, "outlet": 3,
+                                 {"id": "pot-1", "name": "basil", "controller": 0, "channel": 0, "outlet": 3,
                                   "mode": "manual", "target_low_pct": 30, "dose_ml": 100,
                                   "raw": 9000, "read_ts": $nowS
                                   ${if (proposal) ", \"proposal\": {\"id\": 9, \"ml\": 100}" else ""}
                                   ${lastDose?.let { ", \"last_dose\": $it" } ?: ""}
                                   ${advice?.let { ", \"advice\": $it" } ?: ""}},
-                                 {"id": "pot-2", "name": "mint", "controller": "b1", "channel": 1, "mode": "learning"},
-                                 {"id": "pot-3", "name": "fern", "status": "graveyard"}
+                                 {"id": "pot-2", "name": "mint", "controller": 0, "channel": 1, "mode": "learning"},
+                                 {"id": "pot-3", "name": "fern", "status": "graveyard",
+                                  "photo": "photo-abc123"}
                                ]}""",
                         )
                     }
@@ -93,7 +94,7 @@ class GardenViewModelTest {
                 "/health" ->
                     MockResponse().setBody(
                         """{"ok": true, "next_default": 60, "last_ts": $nowS,
-                           "controllers": [{"controller": "b1", "last_seen": $nowS,
+                           "controllers": [{"controller": 0, "last_seen": $nowS,
                                             "next_s": ${nextS ?: "null"}, "float": 1, "pos": "ok"
                                             ${slot?.let { ", \"command\": $it" } ?: ""}}]}""",
                     )
@@ -147,7 +148,7 @@ class GardenViewModelTest {
                             val hours = q["hours"]!!.toLong()
                             val bucket = q["bucket_s"]!!.toInt()
                             MockResponse().setBody(
-                                """{"controller": "b1", "channel": 0, "since": ${nowS - hours * 3600},
+                                """{"controller": 0, "channel": 0, "since": ${nowS - hours * 3600},
                                     "to": $nowS, "bucket_s": $bucket,
                                     "points": [{"ts": ${nowS - 600}, "raw": 9010, "lo": 9000, "hi": 9020, "n": 5},
                                                {"ts": ${nowS - 300}, "raw": 8990, "n": 4}]}""",
@@ -687,7 +688,7 @@ class GardenViewModelTest {
             startCalibration()
         }
         val wizard = waitFor("the wizard") { model.screen.value as? Screen.Calibrate }
-        assertEquals("c=b1 next=5", butler.posts().single().body.readUtf8())
+        assertEquals("c=0 next=5", butler.posts().single().body.readUtf8())
         assertEquals("/interval", butler.posts().single().path)
         assertIs<CalState.SpeedingUp>(wizard.cal)
         assertNull(wizard.cal.prevNextS)
@@ -704,7 +705,7 @@ class GardenViewModelTest {
             startCalibration()
         }
         val wizard = waitFor("the wizard") { model.screen.value as? Screen.Calibrate }
-        assertEquals("c=b1 next=5", butler.posts().single().body.readUtf8())
+        assertEquals("c=0 next=5", butler.posts().single().body.readUtf8())
         assertEquals(120, wizard.cal.prevNextS)
     }
 
@@ -727,7 +728,7 @@ class GardenViewModelTest {
         assertEquals("pot-1", form.id)
         assertNull(form.note)
         val intervals = butler.sent("/interval").map { it.body.readUtf8() }
-        assertEquals(listOf("c=b1 next=5", "c=b1 next=120"), intervals)
+        assertEquals(listOf("c=0 next=5", "c=0 next=120"), intervals)
     }
 
     @Test
@@ -949,7 +950,7 @@ class GardenViewModelTest {
     }
 
     private fun cachedPot(name: String = "basil") =
-        Pot(id = "pot-1", name = name, controller = "b1", channel = 0, outlet = 3, doseMl = 100, raw = 9000)
+        Pot(id = "pot-1", name = name, controller = 0, channel = 0, outlet = 3, doseMl = 100, raw = 9000)
 
     /** Stamped with the butler it came from, as every real write is: a
      * cache is opened only by the address that wrote it. */
@@ -972,6 +973,17 @@ class GardenViewModelTest {
     }
 
     @Test
+    fun `the newest picture rides along for the row thumbnail`() {
+        // The id only: the bytes come from GET /photo/<id>, which the app
+        // already caches, so a list of twenty plants is still one fetch of
+        // text plus whatever the image cache has not seen.
+        ready()
+        val garden = settled().garden
+        assertEquals("photo-abc123", garden.graveyard.single().photo)
+        assertNull(garden.pots.first { it.id == "pot-1" }.photo)
+    }
+
+    @Test
     fun `a new pot form opens with the controller filled in`() {
         ready()
         onMain { newPot() }
@@ -979,7 +991,8 @@ class GardenViewModelTest {
         assertNull(form.id)
         // The DRAFT only: prefilling `original` too would make it look
         // unchanged and it would never be sent.
-        assertEquals("0", form.draft["controller"])
+        assertEquals(DEFAULT_CONTROLLER, form.draft["controller"])
+        assertEquals("0", DEFAULT_CONTROLLER, "board 0 is the one board there is")
         assertEquals(emptyMap(), form.original)
     }
 
@@ -1077,7 +1090,7 @@ class GardenViewModelTest {
         model = withCache(cache)
         onMain { openCache() }
         waitFor("the cached garden") { model.state.value as? UiState.Ready }
-        onMain { resetInterval("b1") }
+        onMain { resetInterval(0) }
         val note = waitFor("the note") { model.listNote.value }
         assertEquals(true, note.startsWith("the butler is not answering"))
         assertEquals(emptyList(), butler.posts().toList())
@@ -1288,7 +1301,7 @@ class GardenViewModelTest {
         val post = butler.posts().single()
         assertEquals("/command", post.path)
         assertEquals("s3cret", post.getHeader("X-Token"))
-        assertEquals("c=b1 water=3 ml=100", post.body.readUtf8())
+        assertEquals("c=0 water=3 ml=100", post.body.readUtf8())
         val issued = assertNotNull(form.watering)
         assertEquals(17, issued.id)
         assertEquals(true, issued.ts in butler.nowS..butler.nowS + 5)
