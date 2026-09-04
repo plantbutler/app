@@ -56,8 +56,16 @@ fun urlProblem(typed: String): String? {
     // OkHttp's own parser, because it is the one that will have to dial it:
     // an address this app accepts and cannot then use is the worst of the
     // three answers, since it looks like the butler's fault.
-    if (url.toHttpUrlOrNull() == null) {
-        return "that is not an address — it should look like 100.x.y.z:9380"
+    val parsed =
+        url.toHttpUrlOrNull()
+            ?: return "that is not an address — it should look like 100.x.y.z:9380"
+    // Every path is appended to this address, so a query or a fragment
+    // would end up in front of the path rather than after it:
+    // "http://x/?t=1" plus "/hello" asks for "/" with a mangled query,
+    // succeeds as far as OkHttp is concerned, and fails as "not your
+    // butler" with nothing pointing at the real cause.
+    if (parsed.encodedQuery != null || parsed.encodedFragment != null) {
+        return "leave off anything after ? or # — this is where the butler is, not a link to a page"
     }
     return null
 }
@@ -70,6 +78,15 @@ fun tokenProblem(typed: String): String? {
     if (token.isEmpty()) return "type the butler's token too"
     if (token.any { it.isWhitespace() }) {
         return "that token has a space in it — check what was pasted"
+    }
+    // Anything outside printable ASCII cannot go in an HTTP header at all,
+    // and OkHttp's refusal quotes the offending value back — which for this
+    // value would put the token on the screen, in front of whoever is
+    // holding the phone. The butler's token is hex, so nothing real is
+    // turned away by this.
+    if (token.any { it < ' ' || it > '~' }) {
+        return "that token has a character an HTTP header cannot carry — a smart quote or " +
+            "an accent, most likely; check what was pasted"
     }
     return null
 }

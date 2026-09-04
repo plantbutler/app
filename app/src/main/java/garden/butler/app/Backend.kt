@@ -301,9 +301,12 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
                 readHello(answer.code, answer.body?.string().orEmpty())
             }
         } catch (why: IllegalArgumentException) {
-            // urlProblem() should have caught this; if it did not, the
-            // screen still has to say something a person can act on.
-            Probe.NotTheButler("that address cannot be dialled: ${why.message}")
+            // Deliberately NOT why.message: OkHttp quotes the offending
+            // value back, and for the header that value is the token — the
+            // message would go straight onto the setup screen. urlProblem
+            // and tokenProblem should have caught this; if they did not,
+            // this is still enough for a person to act on.
+            Probe.NotTheButler("that address or token has a character this app cannot send")
         } catch (why: IOException) {
             Probe.NoAnswer(why.message ?: why.toString())
         }

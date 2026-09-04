@@ -75,6 +75,35 @@ class SettingsTest {
     }
 
     @Test
+    fun `a token with a character a header cannot carry is refused here`() {
+        // Not pedantry: OkHttp's own refusal quotes the offending value
+        // back, and forwarding that message would put the token on the
+        // setup screen. The butler's token is hex, so nothing real is
+        // turned away.
+        for (bad in listOf("s3cret-café", "s3cret\u2019s", "s3\u0001cret", "tökén")) {
+            val why = tokenProblem(bad)
+            assertNotNull(why, bad)
+            assertTrue(why.contains("header"), why)
+        }
+        assertNull(tokenProblem("0f3a9c2b7e1d")) // what a real one looks like
+        assertNull(tokenProblem("~!@#\$%^&*()_+-=[]{}|;:'\",.<>/?")) // printable ASCII is fine
+    }
+
+    @Test
+    fun `an address with a query or a fragment is refused, not silently mangled`() {
+        // Every path is appended to this, so "http://x/?t=1" plus "/hello"
+        // asks for "/" with a mangled query — which parses, succeeds, and
+        // fails later as "not your butler" with nothing pointing at why.
+        for (bad in listOf("http://ciccia:9380/?token=abc", "ciccia:9380#top", "http://x/?a")) {
+            val why = urlProblem(bad)
+            assertNotNull(why, bad)
+            assertTrue(why.contains("?") || why.contains("#"), why)
+        }
+        // A path is not a query: a reverse proxy may well put it under one.
+        assertNull(urlProblem("http://x/butler"))
+    }
+
+    @Test
     fun `a butler that answers is a butler`() {
         val probe = readHello(200, "butler=0.14.0\n")
         assertEquals(Probe.Butler("0.14.0"), probe)

@@ -37,18 +37,21 @@ class SetupFlowTest {
         val requests = CopyOnWriteArrayList<RecordedRequest>()
         @Volatile var potsGate: CountDownLatch? = null
         @Volatile var helloAnswer: MockResponse? = null
+        @Volatile var helloGate: CountDownLatch? = null
 
         override fun dispatch(request: RecordedRequest): MockResponse {
             requests += request
             val given = request.getHeader("X-Token").orEmpty()
             return when (request.path) {
-                "/hello" ->
+                "/hello" -> {
+                    helloGate?.await(5, TimeUnit.SECONDS)
                     helloAnswer
                         ?: if (given == token) {
                             MockResponse().setBody("butler=0.14.0\n")
                         } else {
                             MockResponse().setResponseCode(401).setBody("bad token\n")
                         }
+                }
                 "/pots" -> {
                     potsGate?.await(5, TimeUnit.SECONDS)
                     MockResponse().setBody(
@@ -381,6 +384,104 @@ class SetupFlowTest {
         Thread.sleep(300)
         assertEquals(listOf("mint"), plants())
         assertNull((model.state.value as UiState.Ready).cachedAtS)
+    }
+
+    @Test
+    fun `a slow Connect cannot finish last and move the app back`() {
+        // The pointing coroutine is the one thing here that is not a
+        // flight — it is what cancels the flights — so nothing can cancel
+        // it, and without an attempt counter a five-second probe finishes
+        // after a later one and puts the app back on the butler the user
+        // just left. Which is this pitch's own failure, through another
+        // door.
+        settings.held = ButlerConfig(url(two), "other")
+        launch()
+        plantsBecome(listOf("mint"))
+        val gate = CountDownLatch(1)
+        here.helloGate = gate
+        onMain { openSettings() }
+        setup()
+        onMain {
+            editSetup(url = url(one), token = "s3cret")
+            saveSetup() // hangs on the gate
+        }
+        waitFor("the slow probe") { here.sent("/hello").firstOrNull() }
+        onMain { back() }
+        onMain { openSettings() }
+        setup()
+        onMain {
+            editSetup(url = url(two), token = "other")
+            saveSetup()
+        }
+        plantsBecome(listOf("mint"))
+        gate.countDown() // the abandoned attempt finally gets its answer
+        Thread.sleep(400)
+        assertEquals(listOf("mint"), plants())
+        assertEquals(ButlerConfig(url(two), "other"), settings.held)
+    }
+
+    @Test
+    fun `Connect cannot be tapped twice into two attempts`() {
+        val gate = CountDownLatch(1)
+        here.helloGate = gate
+        launch()
+        setup()
+        onMain {
+            editSetup(url = url(one), token = "s3cret")
+            saveSetup()
+        }
+        waitFor("the probe") { here.sent("/hello").firstOrNull() }
+        onMain { saveSetup() }
+        onMain { saveSetup() }
+        gate.countDown()
+        plantsBecome(listOf("basil"))
+        assertEquals(1, here.sent("/hello").size)
+        assertEquals(1, settings.writes.size)
+    }
+
+    @Test
+    fun `a cache with no butler on it is discarded, not trusted`() {
+        // Written by a build where the address could not change. The first
+        // thing this build does on top of one is ask for an address, which
+        // may well be a different one — so it cannot be assumed to be this
+        // butler's garden.
+        settings.held = ButlerConfig(url(two), "other")
+        cache.held =
+            CachedGarden(
+                listOf(Pot(id = "pot-9", name = "from the old build")),
+                Health(),
+                atS = 1,
+            )
+        launch()
+        plantsBecome(listOf("mint"))
+        assertNull((model.state.value as UiState.Ready).cachedAtS)
+    }
+
+    @Test
+    fun `a token a header cannot carry never reaches a socket`() {
+        launch()
+        setup()
+        onMain {
+            editSetup(url = url(one), token = "s3cret-café")
+            saveSetup()
+        }
+        val why = waitFor("the refusal") { setup().why }
+        assertTrue(why.contains("header"), why)
+        // And above all, the refusal does not quote the token back at
+        // whoever is holding the phone.
+        assertTrue(!why.contains("s3cret"), why)
+        assertTrue(here.requests.isEmpty())
+    }
+
+    @Test
+    fun `the toolbar cannot reach a butler whose address is not known yet`() {
+        launch()
+        setup()
+        onMain { newPot() }
+        onMain { openDoses(null, "Watering") }
+        Thread.sleep(200)
+        assertIs<Screen.Setup>(model.screen.value)
+        assertTrue(here.requests.isEmpty())
     }
 
     @Test

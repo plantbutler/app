@@ -167,6 +167,18 @@ class GardenViewModel(
      * on the wire before that, and nothing comes off the disk either. */
     private var addressed = settings == null
 
+    /** Which attempt to point the app at a butler is the current one.
+     *
+     * A probe takes five seconds to time out, and in five seconds somebody
+     * can go back, come in again and connect somewhere else. The pointing
+     * coroutine is the one thing here that is not a flight — it is what
+     * cancels the flights — so nothing can cancel it, and it has to know
+     * for itself when it has been superseded. Without this a slow first
+     * Connect finishes last and moves the app back to the butler the user
+     * just left: the same failure this pitch is about, through another
+     * door. */
+    private var attempt = 0
+
     init {
         val store = settings
         if (store != null) {
@@ -201,10 +213,11 @@ class GardenViewModel(
             // somewhere else, but a delete that failed, or a kill in
             // between, would leave one butler's garden to be shown under
             // another's name; this is what makes that impossible rather
-            // than unlikely. An empty one is a file written before the
-            // address could change at all, so it can only be this butler's:
-            // it is read once and stamped on the next write.
-            if (cached.url.isNotEmpty() && cached.url != backend.address) return@flight
+            // than unlikely. A file with no address at all is discarded
+            // too: it was written by a build where the address could not
+            // change, and the first thing this build does on top of one is
+            // ask for an address, which may well be a different one.
+            if (cached.url != backend.address) return@flight
             current.value =
                 UiState.Ready(
                     splitGarden(cached.pots, cached.health, phoneS()),
@@ -435,6 +448,7 @@ class GardenViewModel(
     }
 
     fun newPot() {
+        if (!addressed) return
         noteOnList.value = null
         shown.value = Screen.Pot(null, emptyMap(), emptyMap())
     }
@@ -444,6 +458,8 @@ class GardenViewModel(
      * typing a secret again — and shows as dots until the eye is tapped. */
     fun openSettings() {
         val store = settings ?: return
+        // Whatever was being tried is no longer what the user is doing.
+        attempt++
         noteOnList.value = null
         flight {
             val stored = withContext(Dispatchers.IO) { store.read() }
@@ -471,16 +487,21 @@ class GardenViewModel(
     fun saveSetup() {
         val form = shown.value as? Screen.Setup ?: return
         val store = settings ?: return
-        urlProblem(form.url)?.let { why -> return onSetup(form) { it.copy(why = why) } }
-        tokenProblem(form.token)?.let { why -> return onSetup(form) { it.copy(why = why) } }
+        if (form.checking) return // one address is being tried already
+        urlProblem(form.url)?.let { why -> return onSetup { it.copy(why = why) } }
+        tokenProblem(form.token)?.let { why -> return onSetup { it.copy(why = why) } }
         val candidate = ButlerConfig(normaliseUrl(form.url), form.token.trim())
-        onSetup(form) { it.copy(checking = true, why = null) }
+        onSetup { it.copy(checking = true, why = null) }
+        val mine = ++attempt
         // Deliberately not a flight: pointing the app somewhere else cancels
         // every flight, and this is the coroutine that does the pointing.
+        // Which is exactly why it needs `attempt` of its own — nothing else
+        // can cancel it, so it has to know when it has been superseded.
         viewModelScope.launch {
             val probe = withContext(Dispatchers.IO) { backend.probe(candidate) }
+            if (mine != attempt) return@launch
             if (probe !is Probe.Butler) {
-                return@launch onSetup(form) {
+                return@launch onSetup {
                     it.copy(checking = false, why = probeLine(probe, hostOf(candidate.url)))
                 }
             }
@@ -500,8 +521,9 @@ class GardenViewModel(
                     "the butler answered, but this phone could not store the address: " +
                         (why.message ?: why.toString())
                 }
+            if (mine != attempt) return@launch
             if (kept != null) {
-                return@launch onSetup(form) { it.copy(checking = false, why = kept) }
+                return@launch onSetup { it.copy(checking = false, why = kept) }
             }
             pointAt(candidate)
         }
@@ -532,12 +554,6 @@ class GardenViewModel(
         shown.update { if (it is Screen.Setup) change(it) else it }
     }
 
-    /** An answer lands only on the screen it was asked from: a probe takes
-     * five seconds to time out, and the user may have left by then. */
-    private inline fun onSetup(of: Screen.Setup, change: (Screen.Setup) -> Screen.Setup) {
-        shown.update { if (it is Screen.Setup && it.first == of.first) change(it) else it }
-    }
-
     fun edit(key: String, value: String) =
         onPot { it.copy(draft = it.draft + (key to value), refused = null, waterRefused = null) }
 
@@ -559,6 +575,7 @@ class GardenViewModel(
      * list. The rows come from the backend already attributed, so nothing
      * here has to guess whose dose was whose. */
     fun openDoses(potId: String?, title: String) {
+        if (!addressed) return
         val parent = shown.value as? Screen.Pot
         // Not while the form has something on the wire. Back restores this
         // very snapshot, so leaving mid-save would bring back a form stuck
