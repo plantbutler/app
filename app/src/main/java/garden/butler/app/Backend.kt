@@ -157,6 +157,43 @@ data class DosesAnswer(
     val now: Long = 0,
 )
 
+/** One photograph of a plant. `missing` is a row whose file has gone — a
+ * half-restored backup, a volume that came back empty. The backend says so
+ * rather than serving an image that will not load, and the strip shows the
+ * gap rather than a broken picture.
+ *
+ * `species` is what the pot said it was the day the picture was taken. A
+ * pot outlives its plant, and this is what draws the break in the strip. */
+@Serializable
+data class Photo(
+    val id: String,
+    val ts: Long = 0,
+    val bytes: Long = 0,
+    val w: Int? = null,
+    val h: Int? = null,
+    val species: String? = null,
+    val missing: Boolean = false,
+)
+
+@Serializable
+data class PhotosAnswer(
+    val pot: String = "",
+    val photos: List<Photo> = emptyList(),
+    val more: Boolean = false,
+    val now: Long = 0,
+)
+
+/** A picture's address and the one header it needs. The photo routes are
+ * the only gated reads the backend has, so this is the one place the token
+ * leaves for something that is not an HTTP call made in this class — the
+ * image loader has to make its own. */
+data class PhotoSource(val url: String, val token: String) {
+    /** Never the token, for the same reason ButlerConfig does not print
+     * it: the generated toString of a data class is the shortest path
+     * there is from a secret to a crash report. */
+    override fun toString(): String = "PhotoSource(url=$url, token=***)"
+}
+
 @Serializable
 data class PotsAnswer(
     val pots: List<Pot> = emptyList(),
@@ -236,6 +273,15 @@ fun parseDoses(body: String): DosesAnswer = json.decodeFromString(body)
 fun parseHealth(body: String): Health = json.decodeFromString(body)
 
 fun parseSpecies(body: String): SpeciesAnswer = json.decodeFromString(body)
+
+fun parsePhotos(body: String): PhotosAnswer = json.decodeFromString(body)
+
+/** `photo=photo-9c1f0ab2 ts=…` as POST /photo answers it; null when it is
+ * not that. */
+fun parsePhotoAnswer(answer: String): String? =
+    answer.trim().split(" ").firstOrNull()?.let {
+        it.removePrefix("photo=").takeIf { id -> id != it && id.isNotEmpty() }
+    }
 
 /** The backend said no, in its own words: "refused: …", "busy: cmd=3
  * state=sent", "try again: …", "bad token". Shown verbatim; the backend's
@@ -360,6 +406,30 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
     fun species(query: String): SpeciesAnswer =
         parseSpecies(get("/species?q=" + URLEncoder.encode(query, "UTF-8")))
 
+    /** One pot's photographs, newest first. */
+    fun photos(potId: String, limit: Int = PHOTOS_LIMIT): PhotosAnswer =
+        parsePhotos(get("/photos?pot=" + URLEncoder.encode(potId, "UTF-8") + "&limit=" + limit))
+
+    /** Where a picture is and what it takes to read it. */
+    fun photoSource(photoId: String): PhotoSource =
+        PhotoSource(baseUrl.trimEnd('/') + "/photo/" + photoId, token)
+
+    /** The JPEG itself, as the body: the one call here whose payload is not
+     * text. The phone has already downscaled it — `w` and `h` are what it
+     * downscaled to, and the backend keeps them as a layout hint. */
+    fun addPhoto(potId: String, jpeg: ByteArray, w: Int, h: Int): String? {
+        val query = "?pot=" + URLEncoder.encode(potId, "UTF-8") + "&w=" + w + "&h=" + h
+        val request =
+            Request.Builder()
+                .url(baseUrl.trimEnd('/') + "/photo" + query)
+                .header("X-Token", token)
+                .post(jpeg.toRequestBody(JPEG))
+                .build()
+        return parsePhotoAnswer(answerOf("/photo", request))
+    }
+
+    fun deletePhoto(photoId: String): String = post("/photo/delete", "photo=$photoId")
+
     /** This offer was seen and refused. There is no accept — accepting is
      * postPot() with the numbers, like any other edit. */
     fun dismissAdvice(potId: String): String = post("/advice", "pot=$potId dismiss=1")
@@ -404,5 +474,6 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
 
     private companion object {
         val TEXT = "text/plain; charset=utf-8".toMediaType()
+        val JPEG = "image/jpeg".toMediaType()
     }
 }

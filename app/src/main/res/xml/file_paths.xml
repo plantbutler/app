@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Where the camera app is allowed to write. The app's own cache and
+     nothing else: the full-size original is worth nothing once it has been
+     shrunk and sent, so it lives for one upload and the system may empty
+     the directory whenever it likes. -->
+<paths>
+    <cache-path name="camera" path="camera/" />
+</paths>

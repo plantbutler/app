@@ -138,6 +138,12 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                     model::setChartWindow,
                 )
             }
+            // Under the curve, and read the same way: left to right, over
+            // time. An environment pot is a sensor on a shelf and has no
+            // plant to photograph.
+            if (pot == null || !pot.name.startsWith(ENV_PREFIX)) {
+                PhotoStrip(screen, pot, model)
+            }
             if (pot != null && !pot.name.startsWith(ENV_PREFIX)) {
                 val dirtyKeys = changedFields(screen.original, screen.draft).keys + emptied.map { it.key }
                 WaterRow(

@@ -55,6 +55,11 @@ class GardenViewModelTest {
         @Volatile var slot: String? = null
         /** The band the backend would offer pot-1, as /pots carries it. */
         @Volatile var advice: String? = null
+        /** The pot's photographs, as the strip would be sent them. */
+        val photos = CopyOnWriteArrayList<String>()
+        @Volatile var failPhotos = false
+        @Volatile var photoAnswer = MockResponse().setBody("photo=photo-new ts=1757000000\n")
+        @Volatile var photoGate: CountDownLatch? = null
         @Volatile var speciesAnswer =
             MockResponse().setBody(
                 """{"query": "basil", "matched": "common", "accepted": "Ocimum basilicum",
@@ -95,10 +100,34 @@ class GardenViewModelTest {
                     potAnswer
                 }
                 "/command" -> commandAnswer
+                "/photo/delete" -> {
+                    photos.remove(
+                        request.body.copy().readUtf8().trim().removePrefix("photo="),
+                    )
+                    MockResponse().setBody("ok\n")
+                }
                 "/advice" -> MockResponse().setBody("ok\n")
                 "/interval" -> MockResponse().setBody("next=${request.body.copy().readUtf8().substringAfter("next=")}\n")
                 else ->
-                    if (request.path?.startsWith("/species") == true) {
+                    if (request.path?.startsWith("/photos") == true) {
+                        if (failPhotos) {
+                            MockResponse().setResponseCode(503).setBody("try again: x\n")
+                        } else {
+                            val rows =
+                                photos.mapIndexed { i, id ->
+                                    """{"id": "$id", "ts": ${nowS - 1000 + i}, "bytes": 400000,
+                                        "species": "Ocimum_basilicum"}"""
+                                }
+                            MockResponse().setBody(
+                                """{"pot": "pot-1", "more": false, "now": $nowS,
+                                    "photos": [${rows.joinToString(",")}]}""",
+                            )
+                        }
+                    } else if (request.path?.startsWith("/photo?") == true) {
+                        photoGate?.await(5, TimeUnit.SECONDS)
+                        photos += "photo-new"
+                        photoAnswer
+                    } else if (request.path?.startsWith("/species") == true) {
                         speciesAnswer
                     } else if (request.path?.startsWith("/history") == true) {
                         if (failHistory) {
@@ -167,6 +196,10 @@ class GardenViewModelTest {
         fun histories() = requests.filter { it.path?.startsWith("/history") == true }
 
         fun lookups() = requests.filter { it.path?.startsWith("/species") == true }
+
+        fun strips() = requests.filter { it.path?.startsWith("/photos") == true }
+
+        fun uploads() = requests.filter { it.path?.startsWith("/photo?") == true }
 
         fun posts() = requests.filter { it.method == "POST" }
     }
@@ -245,6 +278,123 @@ class GardenViewModelTest {
         Thread.sleep(200)
         assertEquals(2, butler.sent("/pots").size)
         assertEquals(2, butler.sent("/health").size)
+    }
+
+    // ------------------------------------------------------------------ //
+    // A picture of the plant, over time
+
+    @Test
+    fun `opening a pot reads its strip`() {
+        butler.photos += "photo-a"
+        ready()
+        onMain { open("pot-1") }
+        val photos = waitFor("the strip") { pot().photos }
+        assertEquals(listOf("photo-a"), photos.map { it.id })
+        assertEquals("pot-1", butler.strips().single().path?.substringAfter("pot=")?.substringBefore("&"))
+    }
+
+    @Test
+    fun `a picture goes up and the strip is re-read`() {
+        ready()
+        onMain { open("pot-1") }
+        waitFor("the first strip") { pot().photos }
+        onMain { addPhoto(byteArrayOf(1, 2, 3), 1600, 1200) }
+        val photos = waitFor("the picture") { pot().photos?.takeIf { it.isNotEmpty() } }
+        assertEquals(listOf("photo-new"), photos.map { it.id })
+        val upload = butler.uploads().single()
+        assertEquals(3, upload.bodySize)
+        assertEquals("image/jpeg", upload.getHeader("Content-Type"))
+        assertTrue(upload.path!!.contains("w=1600"), upload.path!!)
+        assertTrue(upload.path!!.contains("h=1200"), upload.path!!)
+        assertEquals("s3cret", upload.getHeader("X-Token"))
+    }
+
+    @Test
+    fun `an upload that is refused says so and still re-reads the strip`() {
+        // A POST that timed out client-side may still have stored the
+        // picture: the strip is the only thing that knows which happened.
+        butler.photoAnswer = MockResponse().setResponseCode(507).setBody("refused: no space left\n")
+        ready()
+        onMain { open("pot-1") }
+        waitFor("the first strip") { pot().photos }
+        onMain { addPhoto(byteArrayOf(1), 800, 600) }
+        val note = waitFor("the refusal") { pot().note }
+        assertTrue(note.contains("no space left"), note)
+        assertEquals(2, butler.strips().size)
+        assertTrue(!pot().uploading)
+    }
+
+    @Test
+    fun `a picture cannot be taken of a pot that has not been saved`() {
+        ready()
+        onMain { newPot() }
+        onMain { addPhoto(byteArrayOf(1), 800, 600) }
+        assertEquals("save the pot first", waitFor("the refusal") { pot().note })
+        assertTrue(butler.uploads().isEmpty())
+    }
+
+    @Test
+    fun `forgetting a picture takes it off the strip`() {
+        butler.photos += "photo-a"
+        butler.photos += "photo-b"
+        ready()
+        onMain { open("pot-1") }
+        waitFor("the strip") { pot().photos?.takeIf { it.size == 2 } }
+        onMain { viewPhoto("photo-a") }
+        assertEquals("photo-a", pot().viewing)
+        onMain { deletePhoto("photo-a") }
+        val left = waitFor("the shorter strip") { pot().photos?.takeIf { it.size == 1 } }
+        assertEquals(listOf("photo-b"), left.map { it.id })
+        assertNull(pot().viewing)
+    }
+
+    @Test
+    fun `a strip that will not load keeps the form and says why`() {
+        butler.failPhotos = true
+        ready()
+        onMain { open("pot-1") }
+        val why = waitFor("the reason") { pot().photosWhy }
+        assertTrue(why.startsWith("pictures:"), why)
+        assertNull(pot().photos)
+    }
+
+    @Test
+    fun `an upload that lands after the user moved on reloads nobody else's strip`() {
+        // Async outcomes land only on the form they came from, and a reload
+        // is an outcome like any other: reloading whatever is on screen
+        // would cancel the other pot's own fetch to re-ask a question
+        // nobody asked.
+        val gate = CountDownLatch(1)
+        butler.photoGate = gate
+        ready()
+        onMain { open("pot-1") }
+        waitFor("pot-1's strip") { pot().photos }
+        onMain { addPhoto(byteArrayOf(1), 800, 600) }
+        waitFor("the upload") { butler.uploads().firstOrNull() }
+        onMain { back() }
+        onMain { open("pot-2") }
+        waitFor("pot-2's strip") { pot().photos }
+        val before = butler.strips().size
+        gate.countDown()
+        Thread.sleep(300)
+        assertEquals(before, butler.strips().size)
+        assertEquals("pot-2", pot().id)
+    }
+
+    @Test
+    fun `a picture's address never prints its token`() {
+        ready()
+        val shown = onMainGet { photoSource("photo-a") }.toString()
+        assertTrue(shown.contains("/photo/photo-a"), shown)
+        assertTrue(!shown.contains("s3cret"), shown)
+    }
+
+    @Test
+    fun `a picture's address carries the token, because these reads are gated`() {
+        ready()
+        val source = onMainGet { photoSource("photo-a") }
+        assertTrue(source.url.endsWith("/photo/photo-a"), source.url)
+        assertEquals("s3cret", source.token)
     }
 
     @Test

@@ -61,6 +61,13 @@ sealed interface Screen {
          * the garden carries the cached care beside it afterwards. */
         val lookup: SpeciesAnswer? = null,
         val lookingUp: Boolean = false,
+        /** This pot's photographs, newest first as the wire sends them; the
+         * strip turns them round. Null means not asked for yet. */
+        val photos: kotlin.collections.List<Photo>? = null,
+        val photosWhy: String? = null,
+        val uploading: Boolean = false,
+        /** The photograph shown full size over the form, by id. */
+        val viewing: String? = null,
     ) : Screen
 
     data class Calibrate(val parent: Pot, val cal: CalState) : Screen
@@ -144,6 +151,7 @@ class GardenViewModel(
     private var refreshAgain = false
     private var historyFlight: Job? = null
     private var dosesFlight: Job? = null
+    private var photosFlight: Job? = null
 
     private val shown = MutableStateFlow<Screen>(Screen.List)
     val screen: StateFlow<Screen> = shown
@@ -337,6 +345,7 @@ class GardenViewModel(
         val form = Screen.Pot(id, draft, draft)
         shown.value = form
         loadHistory(form, pot)
+        loadPhotos(form)
     }
 
     /** The curve is raw counts read through the pot's current calibration,
@@ -363,6 +372,92 @@ class GardenViewModel(
                     onPot(form) { it.copy(historyWhy = "chart: " + (why.message ?: why.toString())) }
                 }
             }
+    }
+
+    /** The pot's own growth history. Single-flight like the chart's loader:
+     * an upload refreshes it, and two answers racing would put the older
+     * strip back over the newer one. A failed load keeps whatever strip is
+     * already up and says why beside it. */
+    private fun loadPhotos(form: Screen.Pot) {
+        val id = form.id ?: return
+        photosFlight?.cancel()
+        photosFlight =
+            flight {
+                try {
+                    val answer = withContext(Dispatchers.IO) { backend.photos(id) }
+                    onPot(form) { it.copy(photos = answer.photos, photosWhy = null) }
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    ensureActive()
+                    onPot(form) {
+                        it.copy(photosWhy = "pictures: " + (why.message ?: why.toString()))
+                    }
+                }
+            }
+    }
+
+    fun reloadPhotos() = (shown.value as? Screen.Pot)?.let { loadPhotos(it) }
+
+    /** Re-read one form's strip, and only if that form is still up. Async
+     * outcomes land only on the form they came from, and a reload is an
+     * outcome like any other. */
+    private fun reloadPhotosOf(of: Screen.Pot) =
+        (shown.value as? Screen.Pot)?.takeIf { it.isForm(of) }?.let { loadPhotos(it) }
+
+    /** Where a picture is and what it takes to read it: the photo routes
+     * are the only gated reads, so the image loader needs the header. */
+    fun photoSource(photoId: String): PhotoSource = backend.photoSource(photoId)
+
+    /** One picture, already downscaled by the screen that took it. The
+     * bytes go up; what comes back is the strip, re-read. */
+    fun addPhoto(jpeg: ByteArray, w: Int, h: Int) {
+        val form = shown.value as? Screen.Pot ?: return
+        val id = form.id ?: return noteOnPot(form, "save the pot first")
+        staleRefusal()?.let { why -> return noteOnPot(form, why) }
+        onPot(form) { it.copy(uploading = true, note = null, photosWhy = null) }
+        flight {
+            val why =
+                try {
+                    withContext(Dispatchers.IO) { backend.addPhoto(id, jpeg, w, h) }
+                    null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (refused: Exception) {
+                    refused.message ?: refused.toString()
+                }
+            onPot(form) { it.copy(uploading = false, note = why) }
+            // Whether it landed or not: a POST that timed out client-side
+            // may still have stored the picture, and the strip is what says
+            // which happened. Only this form's, though — the user may have
+            // moved on to another pot by now, and reloading whatever is on
+            // screen would cancel that pot's own fetch to re-ask a question
+            // nobody asked.
+            reloadPhotosOf(form)
+        }
+    }
+
+    fun viewPhoto(photoId: String?) = onPot { it.copy(viewing = photoId) }
+
+    /** Forget one picture. The row goes first on the backend, so this is
+     * gone from the strip even if the volume will not give up the bytes. */
+    fun deletePhoto(photoId: String) {
+        val form = shown.value as? Screen.Pot ?: return
+        staleRefusal()?.let { why -> return noteOnPot(form, why) }
+        onPot(form) { it.copy(viewing = null) }
+        flight {
+            val note =
+                try {
+                    withContext(Dispatchers.IO) { backend.deletePhoto(photoId) }
+                    null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (refused: Exception) {
+                    refused.message ?: refused.toString()
+                }
+            onPot(form) { it.copy(note = note) }
+            reloadPhotosOf(form)
+        }
     }
 
     /** Day, week or month on the open form's chart. The curve is dropped
@@ -539,6 +634,7 @@ class GardenViewModel(
         fetching = null
         historyFlight = null
         dosesFlight = null
+        photosFlight = null
         polling = null
         refreshAgain = false
         calController = null

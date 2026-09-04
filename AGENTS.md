@@ -24,9 +24,9 @@ state flows, pure functions for every decision, JVM tests only.
 3. **Manage the garden** — done (app#2). Names, thresholds, channel/valve/plant mapping,
    recalibration capture, controller health, approve/verdict. See "What is here".
 
-Not in v1: login, Play Store, push via FCM, widgets, theming. (Photographs arrived with the care
-lookup on 2026-09-04, and only those: the care source's picture of a species, so somebody
-searching by common name confirms by eye rather than by spelling.) Offline is a read-only
+Not in v1: login, Play Store, push via FCM, widgets, theming. Photographs of your own plants
+arrived on 2026-09-04: a pot keeps its own strip, oldest first, and the care source's picture of
+the species sits beside them as the reference. Offline is a read-only
 cache since 2026-09-03 — the last answer, stamped with its age, and every write refused while it
 is on screen. Nothing is queued to send later.
 
@@ -141,6 +141,26 @@ is on screen. Nothing is queued to send later.
   sentence under the fields says **which** of three things went wrong: the address, the token, or
   what is listening there. Only one of them is fixed by retyping the token, and telling them apart
   is most of what the screen is for. The token field is dots with a show/hide.
+- `Photos.kt` — a pot's own growth history, as decisions: `sampleSize`/`fitted` (the long edge is
+  capped at 1600 before anything is uploaded — a phone photo is several megabytes and the NAS
+  volume and its backup were never sized for hundreds of them; subsampled on the way out of the
+  decoder, so twelve megapixels never arrive whole in memory), `strip` (oldest first, so it reads
+  left to right as the plant grew — the wire is newest first like every other list), `speciesBreaks`
+  (a pot outlives its plant and nothing records a replant, so the mark is where the species the
+  picture was taken under changed; honest about what it cannot see — basil after basil leaves no
+  trace, and a null species is "nobody said" rather than "a different plant"), `photoDay`,
+  `photoLine`, `fileSize`.
+- `PhotoFile.kt` — the bitmap half, Android-only: where the camera writes (one name in the cache,
+  reused: the full-size original is worth nothing once it has been shrunk and sent) and
+  `shrinkJpeg`, which decodes subsampled, **turns the picture upright from EXIF** — a phone writes
+  the sensor's orientation into a tag rather than into the pixels, re-encoding drops it, and
+  without this every portrait picture would come back on its side for good — then scales and
+  re-encodes. Null on anything unreadable.
+- `PhotoStrip.kt` — the strip under the chart, the camera button, and the full-size dialog with
+  Delete. The care source's picture of the species sits first and dimmed: it is the reference,
+  never a stand-in for a picture of the actual pot. A row the butler reports as `missing` shows the
+  gap and says "gone" rather than an image that will not load. Coil keys on the URL and a
+  photograph's id is minted once, so nothing is re-downloaded over the tailnet.
 - `Main.kt` — `App()`: one `when` over `Screen`, the 60 s refresh loop (paused while the
   wizard polls every 2 s), the BackHandler for the wizard. `GardenScreen.kt`, `PotScreen.kt`
   (hero line, the chart, the water row, proposal card, dose card with verdict chips, discard
@@ -151,7 +171,7 @@ is on screen. Nothing is queued to send later.
 (`CalibrationTest`, `ChartTest`, `WaterTest`, `PotFormTest`, `GardenTest`, `SettingsTest`), wire
 parsing (`BackendTest`), the HTTP layer against `MockWebServer` (`BackendWireTest`), the
 ViewModel driver against `MockWebServer` with `Dispatchers.setMain` and a settable clock
-(`GardenViewModelTest`), and first start and changing butler against **two** fake butlers on two
+(`GardenViewModelTest`), the photo strip's decisions (`PhotosTest`), and first start and changing butler against **two** fake butlers on two
 sockets (`SetupFlowTest`) — two, because the half of that pitch worth testing only exists when
 there are two: whose cache this is, and where a slow answer lands. The Canvas itself is the one thing without a test: everything it
 draws comes from a pure function that has one. No emulator anywhere.
