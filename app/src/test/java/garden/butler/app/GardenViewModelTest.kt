@@ -11,6 +11,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
@@ -52,6 +53,14 @@ class GardenViewModelTest {
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
         /** What b1's one slot holds, as /health shows it. */
         @Volatile var slot: String? = null
+        /** The band the backend would offer pot-1, as /pots carries it. */
+        @Volatile var advice: String? = null
+        @Volatile var speciesAnswer =
+            MockResponse().setBody(
+                """{"query": "basil", "matched": "common", "accepted": "Ocimum basilicum",
+                    "care": {"found": true, "light": 7, "common_name": "Basil"},
+                    "candidates": [], "note": "Trefle: Ocimum basilicum"}""",
+            )
 
         override fun dispatch(request: RecordedRequest): MockResponse {
             requests += request
@@ -67,7 +76,8 @@ class GardenViewModelTest {
                                   "mode": "manual", "target_low_pct": 30, "dose_ml": 100,
                                   "raw": 9000, "read_ts": $nowS
                                   ${if (proposal) ", \"proposal\": {\"id\": 9, \"ml\": 100}" else ""}
-                                  ${lastDose?.let { ", \"last_dose\": $it" } ?: ""}},
+                                  ${lastDose?.let { ", \"last_dose\": $it" } ?: ""}
+                                  ${advice?.let { ", \"advice\": $it" } ?: ""}},
                                  {"id": "pot-2", "name": "mint", "controller": "b1", "channel": 1, "mode": "learning"}
                                ]}""",
                         )
@@ -85,9 +95,12 @@ class GardenViewModelTest {
                     potAnswer
                 }
                 "/command" -> commandAnswer
+                "/advice" -> MockResponse().setBody("ok\n")
                 "/interval" -> MockResponse().setBody("next=${request.body.copy().readUtf8().substringAfter("next=")}\n")
                 else ->
-                    if (request.path?.startsWith("/history") == true) {
+                    if (request.path?.startsWith("/species") == true) {
+                        speciesAnswer
+                    } else if (request.path?.startsWith("/history") == true) {
                         if (failHistory) {
                             MockResponse().setResponseCode(503).setBody("try again: x\n")
                         } else {
@@ -152,6 +165,8 @@ class GardenViewModelTest {
         fun sent(path: String) = requests.filter { it.path == path }
 
         fun histories() = requests.filter { it.path?.startsWith("/history") == true }
+
+        fun lookups() = requests.filter { it.path?.startsWith("/species") == true }
 
         fun posts() = requests.filter { it.method == "POST" }
     }
@@ -226,6 +241,99 @@ class GardenViewModelTest {
         Thread.sleep(200)
         assertEquals(2, butler.sent("/pots").size)
         assertEquals(2, butler.sent("/health").size)
+    }
+
+    @Test
+    fun `a lookup asks about the typed species and lands on the form`() {
+        ready()
+        onMain {
+            open("pot-1")
+            edit("species", "basil")
+            lookUpSpecies()
+        }
+        val answer = waitFor("the lookup") { pot().lookup }
+        assertEquals("Ocimum basilicum", answer.accepted)
+        assertEquals("basil", butler.lookups().single().path?.substringAfter("q="))
+    }
+
+    @Test
+    fun `a lookup with nothing typed asks nobody`() {
+        ready()
+        onMain {
+            open("pot-1")
+            lookUpSpecies()
+        }
+        assertEquals("type a species first", waitFor("the refusal") { pot().lookup }.note)
+        assertTrue(butler.lookups().isEmpty())
+    }
+
+    @Test
+    fun `picking from the shortlist fills the field and asks again`() {
+        butler.speciesAnswer =
+            MockResponse().setBody(
+                """{"query": "tomatoe", "matched": "none", "accepted": null,
+                    "candidates": [{"name": "Solanum lycopersicum", "common": "Tomato",
+                                    "image": "https://img/x", "slug": "sl"}],
+                    "note": "not sure which one — pick the plant you recognise"}""",
+            )
+        ready()
+        onMain {
+            open("pot-1")
+            edit("species", "tomatoe")
+            lookUpSpecies()
+        }
+        waitFor("the shortlist") { pot().lookup?.candidates?.firstOrNull() }
+        onMain { pickCandidate("Solanum lycopersicum") }
+        // The name lands as a single wire token, and the second question is
+        // asked about it rather than about what was typed.
+        assertEquals("Solanum_lycopersicum", waitFor("the filled field") { pot().draft["species"] })
+        waitFor("the second lookup") { butler.lookups().getOrNull(1) }
+        // Folded and form-encoded: the backend lowercases and collapses the
+        // same way, so this is one cache key with what a person typed.
+        assertEquals("solanum+lycopersicum", butler.lookups()[1].path?.substringAfter("q="))
+    }
+
+    @Test
+    fun `applying the offer is an ordinary pot edit`() {
+        butler.advice = """{"kind": "target", "low": 30, "high": 50, "why": "herb"}"""
+        ready()
+        val advice = waitFor("the offer") { settled().garden.potById("pot-1")?.advice }
+        onMain {
+            open("pot-1")
+            applyAdvice(advice)
+        }
+        val post = waitFor("the POST") { butler.posts().firstOrNull { it.path == "/pot" } }
+        assertEquals("id=pot-1 target_low_pct=30 target_high_pct=50", post.body.readUtf8())
+    }
+
+    @Test
+    fun `an unsaved target edit refuses the offer rather than overwriting it`() {
+        butler.advice = """{"kind": "target", "low": 30, "high": 50, "why": "herb"}"""
+        ready()
+        val advice = waitFor("the offer") { settled().garden.potById("pot-1")?.advice }
+        onMain {
+            open("pot-1")
+            edit("target_low_pct", "44")
+            applyAdvice(advice)
+        }
+        assertEquals(
+            "save or discard your target edits first",
+            waitFor("the note") { pot().note },
+        )
+        assertTrue(butler.posts().none { it.path == "/pot" })
+    }
+
+    @Test
+    fun `refusing the offer says so to the backend and writes no numbers`() {
+        butler.advice = """{"kind": "target", "low": 30, "high": 50, "why": "herb"}"""
+        ready()
+        onMain {
+            open("pot-1")
+            dismissAdvice()
+        }
+        val post = waitFor("the POST") { butler.posts().firstOrNull { it.path == "/advice" } }
+        assertEquals("pot=pot-1 dismiss=1", post.body.readUtf8())
+        assertTrue(butler.posts().none { it.path == "/pot" })
     }
 
     @Test

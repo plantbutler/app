@@ -22,7 +22,9 @@ state flows, pure functions for every decision, JVM tests only.
 3. **Manage the garden** — done (app#2). Names, thresholds, channel/valve/plant mapping,
    recalibration capture, controller health, approve/verdict. See "What is here".
 
-Not in v1: login, Play Store, push via FCM, widgets, photos, theming. Offline is a read-only
+Not in v1: login, Play Store, push via FCM, widgets, theming. (Photographs arrived with the care
+lookup on 2026-09-04, and only those: the care source's picture of a species, so somebody
+searching by common name confirms by eye rather than by spelling.) Offline is a read-only
 cache since 2026-09-03 — the last answer, stamped with its age, and every write refused while it
 is on screen. Nothing is queued to send later.
 
@@ -96,6 +98,19 @@ is on screen. Nothing is queued to send later.
   refusing to load then would blank the app in the one case it exists for. Only a Ready is left
   alone. `pct` is stripped before writing and `potLine` derives it back from the cached raw, so
   nothing derived is ever read through a calibration it was not taken with.
+- `Care.kt` — what the lookup found, as words: `careLine` (the source's own 0-10 light and
+  humidity scales, said to be its own — ours is a line between dry air and tap water and a 7 here
+  is not a 7% there), `commonName` (dropped when it only repeats the binomial), `adviceLine` (the
+  offered band, numbers first), `betterName` (the accepted name when it is not what was typed — a
+  synonym redirected or a spelling corrected, the one case worth a button) and
+  `normaliseSpecies`, the same folding the backend's cache key uses.
+- `CareScreen.kt` — `SpeciesPanel` under the species field: Look up, then either the plant with
+  its photograph, common name and numbers, or a shortlist of photographs to tap when no name
+  could be placed (a common name, another language, a typo past GBIF). Tapping one fills the
+  field and asks again, which resolves exactly. `AdviceCard` is the offered band with Apply and
+  Not now: Apply is an ordinary `POST /pot` with the two numbers, so nothing writes a watering
+  number without a person tapping it, and Not now is remembered against those numbers so a repot
+  or a change of season asks again. The photographs are the app's only images (Coil).
 - `Water.kt` — the water-now button as pure decisions: `cannotWater` (disabled pot, no
   mapping, no dose, an unsaved controller/outlet/dose edit, a silent board, a busy slot, a
   proposal waiting — in that order), `waterStatus` from `/pots` `last_dose` and `/health`'s

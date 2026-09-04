@@ -153,6 +153,9 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             if (pot?.enabled == 1) { // a disabled pot is neither proposed for nor dosed
                 pot.proposal?.let { ProposalCard(it, nowS, live) { model.approve(it.id) } }
                 pot.lastDose?.let { DoseCard(it, nowS, live) { v -> model.verdict(it.id, v) } }
+                pot.advice?.let {
+                    AdviceCard(it, live && !screen.saving, { model.applyAdvice(it) }, model::dismissAdvice)
+                }
             }
             if (pot != null) {
                 TextButton(
@@ -475,6 +478,10 @@ private fun Form(
                         Text("Recalibrate")
                     }
                 }
+            "species" -> {
+                ValueField(field, draft, model::edit)
+                SpeciesPanel(screen, model)
+            }
             "wet_raw" -> Unit
             else -> ValueField(field, draft, model::edit)
         }
