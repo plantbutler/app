@@ -187,7 +187,12 @@ data class PhotosAnswer(
  * the only gated reads the backend has, so this is the one place the token
  * leaves for something that is not an HTTP call made in this class — the
  * image loader has to make its own. */
-data class PhotoSource(val url: String, val token: String)
+data class PhotoSource(val url: String, val token: String) {
+    /** Never the token, for the same reason ButlerConfig does not print
+     * it: the generated toString of a data class is the shortest path
+     * there is from a secret to a crash report. */
+    override fun toString(): String = "PhotoSource(url=$url, token=***)"
+}
 
 @Serializable
 data class PotsAnswer(

@@ -59,6 +59,7 @@ class GardenViewModelTest {
         val photos = CopyOnWriteArrayList<String>()
         @Volatile var failPhotos = false
         @Volatile var photoAnswer = MockResponse().setBody("photo=photo-new ts=1757000000\n")
+        @Volatile var photoGate: CountDownLatch? = null
         @Volatile var speciesAnswer =
             MockResponse().setBody(
                 """{"query": "basil", "matched": "common", "accepted": "Ocimum basilicum",
@@ -123,6 +124,7 @@ class GardenViewModelTest {
                             )
                         }
                     } else if (request.path?.startsWith("/photo?") == true) {
+                        photoGate?.await(5, TimeUnit.SECONDS)
                         photos += "photo-new"
                         photoAnswer
                     } else if (request.path?.startsWith("/species") == true) {
@@ -354,6 +356,37 @@ class GardenViewModelTest {
         val why = waitFor("the reason") { pot().photosWhy }
         assertTrue(why.startsWith("pictures:"), why)
         assertNull(pot().photos)
+    }
+
+    @Test
+    fun `an upload that lands after the user moved on reloads nobody else's strip`() {
+        // Async outcomes land only on the form they came from, and a reload
+        // is an outcome like any other: reloading whatever is on screen
+        // would cancel the other pot's own fetch to re-ask a question
+        // nobody asked.
+        val gate = CountDownLatch(1)
+        butler.photoGate = gate
+        ready()
+        onMain { open("pot-1") }
+        waitFor("pot-1's strip") { pot().photos }
+        onMain { addPhoto(byteArrayOf(1), 800, 600) }
+        waitFor("the upload") { butler.uploads().firstOrNull() }
+        onMain { back() }
+        onMain { open("pot-2") }
+        waitFor("pot-2's strip") { pot().photos }
+        val before = butler.strips().size
+        gate.countDown()
+        Thread.sleep(300)
+        assertEquals(before, butler.strips().size)
+        assertEquals("pot-2", pot().id)
+    }
+
+    @Test
+    fun `a picture's address never prints its token`() {
+        ready()
+        val shown = onMainGet { photoSource("photo-a") }.toString()
+        assertTrue(shown.contains("/photo/photo-a"), shown)
+        assertTrue(!shown.contains("s3cret"), shown)
     }
 
     @Test

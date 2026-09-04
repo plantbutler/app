@@ -66,22 +66,33 @@ fun shrinkJpeg(context: Context, uri: Uri, cap: Int = PHOTO_LONG_EDGE): Shrunk? 
                 // tag, so without this every picture taken in portrait
                 // would come back on its side, for good.
                 val upright = turned(context, uri, decoded)
+                // Each step can hold a whole bitmap, so the one before it
+                // is let go as soon as it is not the one being used. Three
+                // live at once is the difference between fitting in a
+                // phone's heap and not.
+                if (upright !== decoded) decoded.recycle()
                 val (w, h) = fitted(upright.width, upright.height, cap)
                 val scaled =
                     if (w == upright.width && h == upright.height) {
                         upright
                     } else {
-                        Bitmap.createScaledBitmap(upright, w, h, true)
+                        Bitmap.createScaledBitmap(upright, w, h, true).also { upright.recycle() }
                     }
                 val out = ByteArrayOutputStream()
                 scaled.compress(Bitmap.CompressFormat.JPEG, PHOTO_QUALITY, out)
-                Shrunk(out.toByteArray(), scaled.width, scaled.height)
+                Shrunk(out.toByteArray(), scaled.width, scaled.height).also { scaled.recycle() }
             }
         }
+    } catch (why: OutOfMemoryError) {
+        // Its own clause, and not folded into the one below, because
+        // OutOfMemoryError is an Error and not an Exception: a picture too
+        // big for the heap is the one failure this whole function exists to
+        // survive, and catching Exception alone would let it crash the app.
+        null
     } catch (why: Exception) {
-        // Out of memory on a huge picture, a file that vanished, anything:
-        // the screen says the picture could not be read, which is all the
-        // person can act on.
+        // A file that vanished, a camera app that wrote nothing, anything
+        // else: the screen says the picture could not be read, which is all
+        // the person can act on.
         null
     }
 
