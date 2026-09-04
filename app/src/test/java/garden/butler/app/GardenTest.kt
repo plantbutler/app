@@ -16,7 +16,7 @@ private fun pot(
 ) = Pot(id = id, name = name, status = status, pct = pct, raw = raw, readTs = readTs)
 
 private fun controller(
-    name: String = "b1",
+    name: Int = 0,
     lastSeen: Long = 0,
     nextS: Int? = null,
     float: Int? = null,
@@ -37,7 +37,7 @@ private fun dose(
 private val complete =
     Pot(
         name = "basil",
-        controller = "b1",
+        controller = 0,
         channel = 0,
         outlet = 3,
         dryRaw = 12000,
@@ -130,7 +130,7 @@ class GardenTest {
         // the strip computes silence itself from last_seen.
         val health = Health(ok = true, controllers = listOf(controller(lastSeen = 300)))
         val found = problems(health, nowS = 1000)
-        assertEquals(listOf("b1 last reported 11min ago"), found)
+        assertEquals(listOf("board 0 last reported 11min ago"), found)
     }
 
     @Test
@@ -145,17 +145,17 @@ class GardenTest {
             Health(
                 ok = true,
                 controllers = listOf(controller(lastSeen = 300)),
-                alerts = listOf(RaisedAlert("silent:b1", 950)),
+                alerts = listOf(RaisedAlert("silent:0", 950)),
             )
         val found = problems(paged, nowS = 1000)
-        assertEquals(1, found.count { "b1" in it })
+        assertEquals(1, found.count { "board 0" in it })
     }
 
     @Test
     fun `the default interval comes from the backend, not a baked-in 60`() {
         val health = Health(ok = true, nextDefault = 300, controllers = listOf(controller(lastSeen = 300)))
         assertEquals(emptyList(), problems(health, nowS = 1000)) // 700 s < 3 * 300
-        assertEquals(listOf("b1 last reported 16min ago"), problems(health, nowS = 1300))
+        assertEquals(listOf("board 0 last reported 16min ago"), problems(health, nowS = 1300))
     }
 
     @Test
@@ -163,30 +163,30 @@ class GardenTest {
         val quiet = Health(ok = true, controllers = listOf(controller(lastSeen = 400)))
         assertEquals(emptyList(), problems(quiet, nowS = 1000))
         val silent = Health(ok = true, controllers = listOf(controller(lastSeen = 399)))
-        assertEquals(listOf("b1 last reported 10min ago"), problems(silent, nowS = 1000))
+        assertEquals(listOf("board 0 last reported 10min ago"), problems(silent, nowS = 1000))
     }
 
     @Test
     fun `a configured but never-heard controller is called out`() {
         val health = Health(ok = true, controllers = listOf(controller(lastSeen = 0)))
-        assertEquals(listOf("b1 has never reported"), problems(health, nowS = 1000))
+        assertEquals(listOf("board 0 has never reported"), problems(health, nowS = 1000))
     }
 
     @Test
     fun `raised alerts become readable lines`() {
-        assertEquals("b1 has gone silent", describeAlert("silent:b1"))
-        assertEquals("reservoir empty on b1", describeAlert("float:b1"))
-        assertEquals("b1 lost its manifold position", describeAlert("pos:b1"))
-        assertEquals("sensor ch0 on b1 stopped reporting", describeAlert("sensor:b1:0"))
-        assertEquals("b1 stopped sending float=", describeAlert("fields:float:b1"))
+        assertEquals("board 0 has gone silent", describeAlert("silent:0"))
+        assertEquals("reservoir empty on board 0", describeAlert("float:0"))
+        assertEquals("board 0 lost its manifold position", describeAlert("pos:0"))
+        assertEquals("sensor ch0 on board 0 stopped reporting", describeAlert("sensor:0:0"))
+        assertEquals("board 0 stopped sending float=", describeAlert("fields:float:0"))
         assertEquals("weird:key", describeAlert("weird:key"))
     }
 
     @Test
     fun `a raised alert carries how long it has stood`() {
         assertEquals(
-            "reservoir empty on b1 (50s ago)",
-            describeAlert("float:b1", nowS = 1000, raisedTs = 950),
+            "reservoir empty on board 0 (50s ago)",
+            describeAlert("float:0", nowS = 1000, raisedTs = 950),
         )
     }
 
@@ -197,7 +197,7 @@ class GardenTest {
                 ok = true,
                 controllers =
                     listOf(controller(lastSeen = 990, float = 0, pos = "unknown")),
-                alerts = listOf(RaisedAlert("float:b1", 900)),
+                alerts = listOf(RaisedAlert("float:0", 900)),
             )
         val found = problems(health, nowS = 1000)
         // float shows once (the raised alert), pos once (instant, not yet raised)
@@ -252,19 +252,19 @@ class GardenTest {
     @Test
     fun `the controller line reads seen, interval, float and pos`() {
         assertEquals(
-            "b1 · seen 40s ago · every 60s · float ok · pos ok",
+            "board 0 · seen 40s ago · every 60s · float ok · pos ok",
             controllerLine(controller(lastSeen = 960, float = 1, pos = "ok"), 1000, 60),
         )
         assertEquals(
-            "b1 · never reported · every 5s (override) · float EMPTY · pos unknown",
+            "board 0 · never reported · every 5s (override) · float EMPTY · pos unknown",
             controllerLine(controller(nextS = 5, float = 0, pos = "unknown"), 1000, 60),
         )
         assertEquals(
-            "b1 · seen 10s ago · every 30s · float ? · pos ?",
+            "board 0 · seen 10s ago · every 30s · float ? · pos ?",
             controllerLine(controller(lastSeen = 990), 1000, 30),
         )
         assertEquals(
-            "b1 · seen 10s ago · every 60s · float ok · pos 3",
+            "board 0 · seen 10s ago · every 60s · float ok · pos 3",
             controllerLine(controller(lastSeen = 990, float = 1, pos = "3"), 1000, 60),
         )
     }
@@ -406,5 +406,32 @@ class GardenTest {
         assertEquals("too much", verdictLabel("too_much"))
         assertEquals("too little", verdictLabel("too_little"))
         assertEquals("odd", verdictLabel("odd"))
+    }
+
+    @Test
+    fun `board zero is a real board, not an empty one`() {
+        // The controller is an integer now, and 0 is falsy in every language
+        // this passes through — it is also the number a new pot is filled in
+        // with, so anything testing it for truth refuses the commonest board
+        // there is.
+        val zero = Pot(id = "p", name = "basil", controller = 0, channel = 0, outlet = 0)
+        assertEquals("board 0", boardName(0))
+        assertNull(
+            cannotWater(zero.copy(doseMl = 100), controller(lastSeen = 990), 1000, 60, emptySet())
+        )
+        // Board 0 is not a gap; a missing board is.
+        assertTrue("a controller" in learningGaps(zero.copy(controller = null)))
+        assertFalse("a controller" in learningGaps(zero))
+    }
+
+    @Test
+    fun `an alert key renders its board even when the shape is unfamiliar`() {
+        assertEquals("board 0 has gone silent", describeAlert("silent:0"))
+        // The key is whatever the backend put there. This reads keys rather
+        // than parsing them, so a longer or shorter one still renders a line
+        // instead of throwing: the extra half is ignored, and a missing half
+        // is a question mark.
+        assertEquals("board 0 has gone silent", describeAlert("silent:0:extra"))
+        assertEquals("? has gone silent", describeAlert("silent"))
     }
 }

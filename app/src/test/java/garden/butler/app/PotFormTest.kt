@@ -11,7 +11,7 @@ private val basil =
         id = "pot-3f9a21",
         name = "basil",
         species = "Ocimum_basilicum",
-        controller = "b1",
+        controller = 0,
         channel = 0,
         outlet = 3,
         plantType = "basil",
@@ -31,7 +31,7 @@ class PotFormTest {
     @Test
     fun `wire fields render ints and the status, omit nulls, never leak the rest`() {
         val fields = wireFields(basil)
-        assertEquals("b1", fields["controller"])
+        assertEquals("0", fields["controller"])
         assertEquals("0", fields["channel"])
         assertEquals("12000", fields["dry_raw"])
         assertEquals("30", fields["target_low_pct"])

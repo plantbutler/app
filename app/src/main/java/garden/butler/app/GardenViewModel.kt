@@ -238,7 +238,7 @@ class GardenViewModel(
 
     private var polling: Job? = null
     private var polledTs = 0L
-    private var calController: String? = null
+    private var calController: Int? = null
 
     fun refresh() {
         // Nothing is asked of a butler whose address is not known yet. The
@@ -475,8 +475,8 @@ class GardenViewModel(
         loadHistory(next)
     }
 
-    private fun controllerOf(name: String?): ControllerHealth? =
-        garden?.health?.controllers?.firstOrNull { it.controller == name }
+    private fun controllerOf(number: Int?): ControllerHealth? =
+        garden?.health?.controllers?.firstOrNull { it.controller == number }
 
     private fun nextDefault(): Int = garden?.health?.nextDefault ?: 60
 
@@ -551,7 +551,7 @@ class GardenViewModel(
         // The draft only, never `original`: prefilling both would make the
         // controller look unchanged and never be sent. The cost is that the
         // form opens dirty, so Back asks before dropping it.
-        shown.value = Screen.Pot(null, emptyMap(), mapOf("controller" to "0"))
+        shown.value = Screen.Pot(null, emptyMap(), mapOf("controller" to DEFAULT_CONTROLLER))
     }
 
     /** Change the address or the token. The stored token goes into the
@@ -953,7 +953,7 @@ class GardenViewModel(
         act({ backend.verdict(cmdId, value) }) { noteOnPot(from, it) }
     }
 
-    fun resetInterval(controller: String) {
+    fun resetInterval(controller: Int) {
         staleRefusal()?.let { why ->
             noteOnList.value = why
             return
@@ -961,7 +961,7 @@ class GardenViewModel(
         resetIntervalNow(controller)
     }
 
-    private fun resetIntervalNow(controller: String) =
+    private fun resetIntervalNow(controller: Int) =
         act({
             val next = backend.interval(controller, 0)
             "$controller reports every ${next ?: "default"}s again"

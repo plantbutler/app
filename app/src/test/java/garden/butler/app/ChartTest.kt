@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 
 private fun point(ts: Long, raw: Long, n: Int = 1) = HistoryPoint(ts, raw, n = n)
 
-private fun controller(nextS: Int? = null) = ControllerHealth("b1", lastSeen = 1000, nextS = nextS)
+private fun controller(nextS: Int? = null) = ControllerHealth(0, lastSeen = 1000, nextS = nextS)
 
 private fun history(bucketS: Int = 300, hours: Long = 24, vararg points: HistoryPoint) =
     History("pot-1", since = 2_000_000 - hours * 3600, to = 2_000_000, bucketS = bucketS, points = points.toList())
@@ -265,7 +265,7 @@ class ChartWindowTest {
     fun `the gap that breaks the line scales with the bucket`() {
         // The rabbit hole: a threshold written for a day's 5-min buckets
         // would swallow a whole outage inside one hourly bucket.
-        val board = ControllerHealth("b1", nextS = 60)
+        val board = ControllerHealth(0, nextS = 60)
         assertEquals(600L, chartGapS(ChartWindow.DAY.bucketS, board, 60))
         assertEquals(3600L, chartGapS(ChartWindow.WEEK.bucketS, board, 60))
         assertEquals(7200L, chartGapS(ChartWindow.MONTH.bucketS, board, 60))

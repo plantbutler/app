@@ -32,6 +32,13 @@ the target band and free text in either used to match nothing and cost points si
 field renders `labelFor()`, which falls back to the raw wire word: a value written before these
 were sets, or by a backend newer than this build, shows as itself rather than crashing the form.
 
+The controller is an **integer** (2026-09-05), 0..255, matching the backend and the firmware's
+`PB_CONTROLLER`. Board 0 is a real board and is what a new pot's form fills in
+(`DEFAULT_CONTROLLER`), so nothing anywhere may test a controller for truthiness — `boardName()`
+is how it reaches a person, because a bare "0 has gone silent" reads like a truncated sentence.
+Each garden row also shows the pot's newest photograph, from `Pot.photo` (an id; the bytes come
+from the same cached `GET /photo/<id>` the strip uses). A pot with no picture gets no placeholder.
+
 A plant can die (2026-09-05). `Pot.enabled` is `Pot.status`, and the app tests `== ALIVE` and
 never `!= GRAVEYARD`, so a status word a newer backend invents lands in the Graveyard section
 rather than in the watering list. Burying and reviving are a long press on a garden row;

@@ -271,7 +271,7 @@ fun canCalibrate(
     nowS: Long,
     defaultNextS: Int,
 ): String? {
-    val c = pot.controller
+    val c = pot.controller?.let { boardName(it) }
     if (c == null || pot.channel == null) return "map a controller and a channel first"
     if (pot.mode != "manual") {
         return "set the pot to manual first — the rules would water a sensor held in the air"

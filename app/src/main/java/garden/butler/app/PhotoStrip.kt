@@ -231,7 +231,7 @@ private fun Break(species: String?) {
  * caches on the URL, and a photograph's id is minted once and its bytes
  * never change, so nothing is ever re-downloaded over the tailnet. */
 @Composable
-private fun Picture(photoId: String, model: GardenViewModel, modifier: Modifier = Modifier) {
+fun Picture(photoId: String, model: GardenViewModel, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val source = remember(photoId) { model.photoSource(photoId) }
     AsyncImage(

@@ -55,7 +55,7 @@ class BackendWireTest {
             assertEquals(409 to "busy: cmd=3 state=sent", busy.code to busy.text)
             val later = assertFailsWith<Refused> { backend.verdict(16, "ok") }
             assertEquals(503 to "try again: x", later.code to later.text)
-            val token = assertFailsWith<Refused> { backend.interval("b1", 5) }
+            val token = assertFailsWith<Refused> { backend.interval(0, 5) }
             assertEquals(401 to "bad token", token.code to token.text)
         }
 
@@ -72,8 +72,8 @@ class BackendWireTest {
     fun `interval sends c and next and parses the effective interval`() =
         withServer { server, backend ->
             server.enqueue(MockResponse().setBody("next=5\n"))
-            assertEquals(5, backend.interval("b1", 5))
-            assertEquals("c=b1 next=5", server.takeRequest().body.readUtf8())
+            assertEquals(5, backend.interval(0, 5))
+            assertEquals("c=0 next=5", server.takeRequest().body.readUtf8())
         }
 
     @Test
@@ -134,7 +134,7 @@ class BackendWireTest {
             server.enqueue(
                 MockResponse().setBody(
                     """{"ok": true, "next_default": 30, "last_ts": 1788291874,
-                       "controllers": [{"controller": "b1", "last_seen": 1788291870}]}""",
+                       "controllers": [{"controller": 0, "last_seen": 1788291870}]}""",
                 ),
             )
             val health = backend.health()
@@ -144,7 +144,7 @@ class BackendWireTest {
             assertEquals(true, health.ok)
             assertEquals(30, health.nextDefault)
             assertEquals(1788291874, health.lastTs)
-            assertEquals("b1", health.controllers.single().controller)
+            assertEquals(0, health.controllers.single().controller)
         }
 
     @Test
@@ -166,10 +166,10 @@ class BackendWireTest {
 
             assertEquals("cmd=17 state=sent", backend.approve(17))
             assertEquals("cmd=16 verdict=ok", backend.verdict(16, "ok"))
-            assertEquals(5, backend.interval("b1", 5))
+            assertEquals(5, backend.interval(0, 5))
 
             val expected =
-                listOf("/approve" to "cmd=17", "/verdict" to "cmd=16 verdict=ok", "/interval" to "c=b1 next=5")
+                listOf("/approve" to "cmd=17", "/verdict" to "cmd=16 verdict=ok", "/interval" to "c=0 next=5")
             for ((path, body) in expected) {
                 val sent = server.takeRequest()
                 assertEquals("POST", sent.method)
@@ -211,20 +211,20 @@ class BackendWireTest {
     fun `water posts the controller, outlet and dose with the token and answers the id`() =
         withServer { server, backend ->
             server.enqueue(MockResponse().setBody("cmd=17\n"))
-            assertEquals(17, backend.water("b1", 3, 100))
+            assertEquals(17, backend.water(0, 3, 100))
 
             val sent = server.takeRequest()
             assertEquals("POST", sent.method)
             assertEquals("/command", sent.path)
             assertEquals("s3cret", sent.getHeader("X-Token"))
-            assertEquals("c=b1 water=3 ml=100", sent.body.readUtf8())
+            assertEquals("c=0 water=3 ml=100", sent.body.readUtf8())
         }
 
     @Test
     fun `a taken slot refuses water with the backend's busy line`() =
         withServer { server, backend ->
             server.enqueue(MockResponse().setResponseCode(409).setBody("busy: cmd=3 state=sent\n"))
-            val busy = assertFailsWith<Refused> { backend.water("b1", 3, 100) }
+            val busy = assertFailsWith<Refused> { backend.water(0, 3, 100) }
             assertEquals(409, busy.code)
             assertEquals("busy: cmd=3 state=sent", busy.text)
         }

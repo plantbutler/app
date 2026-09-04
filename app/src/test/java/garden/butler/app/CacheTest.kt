@@ -15,7 +15,7 @@ class CacheTest {
             id = "pot-1",
             name = "basil",
             species = "Ocimum_basilicum",
-            controller = "b1",
+            controller = 0,
             channel = 0,
             outlet = 3,
             dryRaw = 12000,
@@ -28,14 +28,14 @@ class CacheTest {
     @Test
     fun `a garden written is the garden read`() {
         val cache = FileGardenCache(tempFile())
-        val health = Health(ok = true, nextDefault = 60, controllers = listOf(ControllerHealth("b1", 900)))
+        val health = Health(ok = true, nextDefault = 60, controllers = listOf(ControllerHealth(0, 900)))
         cache.write(CachedGarden(listOf(basil), health, atS = 1234))
         val back = cache.read()!!
         assertEquals(1234, back.atS)
         assertEquals(listOf("pot-1"), back.pots.map { it.id })
         assertEquals("Ocimum_basilicum", back.pots[0].species)
         assertEquals(60, back.health.nextDefault)
-        assertEquals("b1", back.health.controllers.single().controller)
+        assertEquals(0, back.health.controllers.single().controller)
     }
 
     @Test
