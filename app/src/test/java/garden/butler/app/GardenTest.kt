@@ -8,12 +8,12 @@ import kotlin.test.assertTrue
 
 private fun pot(
     name: String,
-    enabled: Int = 1,
+    status: String = ALIVE,
     pct: Int? = null,
     raw: Long? = null,
     readTs: Long? = null,
     id: String = "pot-$name",
-) = Pot(id = id, name = name, enabled = enabled, pct = pct, raw = raw, readTs = readTs)
+) = Pot(id = id, name = name, status = status, pct = pct, raw = raw, readTs = readTs)
 
 private fun controller(
     name: String = "b1",
@@ -51,12 +51,12 @@ class GardenTest {
     fun `potById finds a pot whatever its nickname, and never on an empty id`() {
         val garden =
             splitGarden(
-                listOf(pot("basil", id = "pot-1"), pot("cactus", enabled = 0, id = "pot-2")),
+                listOf(pot("basil", id = "pot-1"), pot("cactus", status = GRAVEYARD, id = "pot-2")),
                 Health(ok = true),
                 nowS = 1000,
             )
         assertEquals("basil", garden.potById("pot-1")?.name)
-        assertEquals("cactus", garden.potById("pot-2")?.name) // disabled pots stay reachable
+        assertEquals("cactus", garden.potById("pot-2")?.name) // buried pots stay reachable
         assertNull(garden.potById("pot-nope"))
         // A backend too old to send ids leaves them empty: "" is not a key.
         val old = splitGarden(listOf(pot("basil", id = "")), Health(ok = true), nowS = 1000)
@@ -73,28 +73,28 @@ class GardenTest {
     }
 
     @Test
-    fun `env pots split off and disabled pots vanish`() {
+    fun `env pots split off and buried pots go to the graveyard`() {
         val garden =
             splitGarden(
                 listOf(
                     pot("basil"),
                     pot("env:temp"),
-                    pot("cactus", enabled = 0),
+                    pot("cactus", status = GRAVEYARD),
                 ),
                 Health(ok = true),
                 nowS = 1000,
             )
         assertEquals(listOf("basil"), garden.pots.map { it.name })
         assertEquals(listOf("env:temp"), garden.env.map { it.name })
-        assertEquals(listOf("cactus"), garden.disabled.map { it.name })
+        assertEquals(listOf("cactus"), garden.graveyard.map { it.name })
     }
 
     @Test
-    fun `disabled pots of any name are kept aside and the health travels along`() {
+    fun `buried pots of any name are kept aside and the health travels along`() {
         val health = Health(ok = true, nextDefault = 30)
         val garden =
-            splitGarden(listOf(pot("env:hum", enabled = 0), pot("fern", enabled = 0)), health, 1000)
-        assertEquals(listOf("env:hum", "fern"), garden.disabled.map { it.name })
+            splitGarden(listOf(pot("env:hum", status = GRAVEYARD), pot("fern", status = GRAVEYARD)), health, 1000)
+        assertEquals(listOf("env:hum", "fern"), garden.graveyard.map { it.name })
         assertEquals(emptyList(), garden.pots)
         assertEquals(emptyList(), garden.env)
         assertEquals(health, garden.health)
@@ -355,8 +355,8 @@ class GardenTest {
     }
 
     @Test
-    fun `a disabled pot is never nagged`() {
-        val off = Pot(name = "basil", enabled = 0, lastDose = dose(ackedTs = 1000))
+    fun `a buried pot is never nagged`() {
+        val off = Pot(name = "basil", status = GRAVEYARD, lastDose = dose(ackedTs = 1000))
         assertNull(rowNote(off, 1000 + 2 * 3600))
     }
 

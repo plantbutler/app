@@ -25,10 +25,21 @@ state flows, pure functions for every decision, JVM tests only.
    recalibration capture, controller health, approve/verdict. See "What is here".
 
 Since 2026-09-04 the form explains itself: an ⓘ beside every field opens a one-sentence dialog,
-`kind of plant` is a row of chips rather than free text (it is the base band, so a value that
-matched nothing used to cost twenty points silently), and the two sizes are measurements —
-`plant height (cm)` and `pot diameter (cm)` — which the backend reads as the demand on a water
-buffer and the buffer itself.
+and the two sizes are measurements — `plant height (cm)` and `pot diameter (cm)` — which the
+backend reads as the demand on a water buffer and the buffer itself. `kind of plant` and `soil`
+are dropdowns over closed sets (`PLANT_KINDS`, `SOIL_KINDS` in `PotForm.kt`), because both feed
+the target band and free text in either used to match nothing and cost points silently. A picked
+field renders `labelFor()`, which falls back to the raw wire word: a value written before these
+were sets, or by a backend newer than this build, shows as itself rather than crashing the form.
+
+A plant can die (2026-09-05). `Pot.enabled` is `Pot.status`, and the app tests `== ALIVE` and
+never `!= GRAVEYARD`, so a status word a newer backend invents lands in the Graveyard section
+rather than in the watering list. Burying and reviving are a long press on a garden row;
+deleting is a button at the foot of the pot form behind a dialog that names the plant and lists
+what goes, and it is refused while the garden is a cached memory. `deletePot()` pops the form
+whatever happens, because `PotScreen` keeps rendering from its own snapshot when a pot vanishes
+and would otherwise leave a working form whose Save posts an id that is gone. The chart asks
+`GET /history?pot=`, so an unwired pot — one just back from the graveyard — still has its curve.
 
 Not in v1: login, Play Store, push via FCM, widgets, theming. Photographs of your own plants
 arrived on 2026-09-04: a pot keeps its own strip, oldest first, and the care source's picture of
@@ -188,7 +199,7 @@ sockets (`SetupFlowTest`) — two, because the half of that pitch worth testing 
 there are two: whose cache this is, and where a slow answer lands. The Canvas itself is the one thing without a test: everything it
 draws comes from a pure function that has one. No emulator anywhere.
 
-Known limits, on purpose: no clearing a field (`enabled=0` and `mode=manual` cover the real cases), the backend keeps an interval override forever (a process death between
+Known limits, on purpose: no clearing a field (`status=graveyard` and `mode=manual` cover the real cases), the backend keeps an interval override forever (a process death between
 arming and restoring leaves the board at 5 s until the reset chip is tapped). Calibration
 readings land in the pot's history like any other, so the wizard shows as a spike on the
 chart. A manual dose bypasses cooldown, daily cap, quiet hours and the float/pos gates

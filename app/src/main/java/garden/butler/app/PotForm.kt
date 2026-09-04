@@ -14,25 +14,76 @@ enum class Input {
     TEXT,
     INTEGER,
     DECIMAL,
+    /** One of a closed set: a dropdown, not a box. The backend refuses
+     * anything outside the set, so a typed value could only ever be a
+     * refusal — and, before these were sets, a silent wrong band. */
+    PICK,
 }
+
+/** The values a picked field offers, or null for a field that is typed. */
+fun choicesFor(key: String): List<Kind>? =
+    when (key) {
+        "plant_type" -> PLANT_KINDS
+        "soil" -> SOIL_KINDS
+        "status" -> POT_STATUSES
+        else -> null
+    }
+
+/** What to show for a stored value: its label, or the value itself when
+ * this build has never heard of it. A pot written by a newer backend, or
+ * by free text before these were sets, must render rather than crash. */
+fun labelFor(key: String, wire: String?): String =
+    when {
+        wire.isNullOrEmpty() -> ""
+        else -> choicesFor(key)?.firstOrNull { it.wire == wire }?.label ?: wire
+    }
 
 data class Field(val key: String, val label: String, val input: Input, val help: String)
 
-/** The kinds the backend will accept, and what to call them on screen. The
- * wire words are its own — a label change here must never become a wire
- * change, which is why the two are separate fields. Cacti live under
- * succulent: same band, and two identical choices only make a list harder
- * to pick from. */
+/** A closed set the backend will accept, and what to call each value on
+ * screen. The wire words are its own — a label change here must never
+ * become a wire change, which is why the two are separate fields. */
 data class Kind(val wire: String, val label: String)
 
+/** Driest first, so the dropdown reads as the one axis it actually is. */
 val PLANT_KINDS: List<Kind> =
     listOf(
-        Kind("succulent", "succulent or cactus"),
-        Kind("fern", "fern"),
-        Kind("herb", "herb"),
-        Kind("vegetable", "vegetable"),
-        Kind("tropical", "tropical foliage"),
+        Kind("cactus", "cactus"),
+        Kind("succulent", "succulent"),
+        Kind("orchid", "orchid or epiphyte"),
+        Kind("mediterranean", "Mediterranean or woody shrub"),
+        Kind("bulb", "bulb"),
         Kind("flower", "flowering"),
+        Kind("herb", "herb"),
+        Kind("palm", "palm"),
+        Kind("tropical", "tropical foliage"),
+        Kind("vegetable", "vegetable"),
+        Kind("fern", "fern"),
+        Kind("carnivorous", "carnivorous or bog"),
+    )
+
+/** The soils that MOVE the range. An ordinary potting mix is not among
+ * them on purpose: it is what the plant kinds are written against, so
+ * "not said" and "the bag from the shop" are the same answer. Wettest
+ * first, matching the kinds' own direction. */
+val SOIL_KINDS: List<Kind> =
+    listOf(
+        Kind("sphagnum", "sphagnum moss"),
+        Kind("peat", "peat-based"),
+        Kind("clay", "clay-heavy"),
+        Kind("sandy", "sandy or gritty"),
+        Kind("perlite", "perlite-heavy"),
+        Kind("cactus", "cactus or succulent mix"),
+        Kind("bark", "bark or orchid mix"),
+    )
+
+/** What a pot IS. `alive` waters; everything else is an aside. Two values
+ * today and room for a third, which is why the control is a list and not
+ * a switch. */
+val POT_STATUSES: List<Kind> =
+    listOf(
+        Kind(ALIVE, "alive"),
+        Kind(GRAVEYARD, "graveyard"),
     )
 
 val POT_FIELDS: List<Field> =
@@ -71,7 +122,7 @@ val POT_FIELDS: List<Field> =
         Field(
             "plant_type",
             "kind of plant",
-            Input.TEXT,
+            Input.PICK,
             "The biggest lever on the suggested range: an unlabelled plant starts at " +
                 "35–55%, a succulent at 15–30%. Not sure is a real answer and has its own " +
                 "sensible band — a wrong one here is twenty points no measurement recovers.",
@@ -96,10 +147,11 @@ val POT_FIELDS: List<Field> =
         Field(
             "soil",
             "soil",
-            Input.TEXT,
-            "What it is potted in, in your own words. Sandy, gritty, perlite and clay move " +
-                "the range; anything else is a note to yourself. \"Not sandy\" counts as not " +
-                "sandy.",
+            Input.PICK,
+            "What it is potted in. Only the mixes that actually change how long water stays " +
+                "are listed: sphagnum and peat hold it, clay holds it at the top, and sand, " +
+                "perlite, cactus grit and bark let it go. Ordinary potting compost is what " +
+                "everything else is measured against, so leaving this unset is the same answer.",
         ),
         Field(
             "dry_raw",
@@ -161,12 +213,13 @@ val POT_FIELDS: List<Field> =
                 "Per pot, and always a human act: nothing switches itself.",
         ),
         Field(
-            "enabled",
-            "enabled",
-            Input.INTEGER,
-            "Off means no proposals, no doses and no missing-sensor alerts for this pot. It " +
-                "stays wired where it is — but another pot may then claim that channel or " +
-                "outlet, because only an enabled pot holds one.",
+            "status",
+            "status",
+            Input.PICK,
+            "Graveyard is for a plant that has died: no proposals, no doses and no alerts, and " +
+                "it lets go of its channel and its outlet so another pot can have them. It " +
+                "keeps everything else — its readings, its watering history, its photographs. " +
+                "Bringing it back leaves it unwired, so you say where the new plant went.",
         ),
     )
 
@@ -208,7 +261,7 @@ fun withKind(draft: Map<String, String>, kind: String?): Map<String, String> =
     }
 
 /** The stored pot as the wire would spell it: nulls omitted, ints plain,
- * enabled as 0|1. Never the name (the key of POST /pot) nor anything the
+ * status as its word. Never the name (the key of POST /pot) nor anything the
  * board wrote (raw, pct, read_ts) or the backend derived (proposal,
  * last_dose): those are not editable. */
 fun wireFields(pot: Pot): Map<String, String> {
@@ -232,7 +285,7 @@ fun wireFields(pot: Pot): Map<String, String> {
     put("cooldown_h", pot.cooldownH)
     put("daily_cap_ml", pot.dailyCapMl)
     put("mode", pot.mode)
-    put("enabled", pot.enabled)
+    put("status", pot.status)
     return out
 }
 

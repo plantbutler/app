@@ -22,15 +22,20 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -142,7 +147,10 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             if (pot != null) Text(potLine(pot, nowS), style = MaterialTheme.typography.headlineSmall)
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
-            if (pot != null && pot.controller != null && pot.channel != null) {
+            // Gated on the pot alone: the chart is history, and a pot that
+            // has been unwired — brought back from the graveyard, or waiting
+            // to be replugged — still owns every reading it ever took.
+            if (pot != null) {
                 Chart(
                     screen.history,
                     screen.historyWhy,
@@ -171,7 +179,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             // Stale: every one of these would be refused, so they look it
             // rather than only saying so after the tap.
             val live = cachedAtS == null
-            if (pot?.enabled == 1) { // a disabled pot is neither proposed for nor dosed
+            if (pot?.status == ALIVE) { // a buried pot is neither proposed for nor dosed
                 pot.proposal?.let { ProposalCard(it, nowS, live) { model.approve(it.id) } }
                 pot.lastDose?.let { DoseCard(it, nowS, live) { v -> model.verdict(it.id, v) } }
                 pot.advice?.let {
@@ -214,8 +222,58 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             screen.refused?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
+            // Last, below Save, and only for a pot that exists. The
+            // graveyard is the reversible answer and is a chip in the form
+            // above; this one is not, so it stands apart and asks.
+            if (screen.id != null) {
+                HorizontalDivider()
+                Erase(screen.id, pot?.name ?: screen.original["name"].orEmpty(), live, model)
+            }
         }
     }
+}
+
+/** Erasing the pot. Two taps, and the second one names the plant and says
+ * what goes — a list, not a "this cannot be undone" nobody reads. Greyed
+ * while the screen is a memory: the one irreversible action here must not
+ * be the one thing allowed against a garden nobody has confirmed. */
+@Composable
+private fun Erase(potId: String, name: String, live: Boolean, model: GardenViewModel) {
+    var asking by remember(potId) { mutableStateOf(false) }
+    TextButton(
+        onClick = { asking = true },
+        enabled = live,
+        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+    ) {
+        Text("Delete this pot")
+    }
+    if (!asking) return
+    AlertDialog(
+        onDismissRequest = { asking = false },
+        title = { Text("Delete $name?") },
+        text = {
+            Text(
+                "Its readings, its watering history and its photographs go with it, and none " +
+                    "of it comes back. To keep the record and free the channel and outlet, set " +
+                    "its status to graveyard instead."
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    asking = false
+                    model.deletePot()
+                },
+                colors =
+                    ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+            ) {
+                Text("Delete for ever")
+            }
+        },
+        dismissButton = { TextButton(onClick = { asking = false }) { Text("Keep it") } },
+    )
 }
 
 /** The stored pot with the draft's own prerequisites laid over it, so the
@@ -478,21 +536,19 @@ private fun Form(
                     }
                 }
             }
-            "enabled" ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Switch(
-                        checked = (draft["enabled"] ?: "1") == "1",
-                        onCheckedChange = { model.edit("enabled", if (it) "1" else "0") },
-                    )
-                    Text(field.label)
-                    Explain(field, model)
-                }
-            // A closed set, so it is picked and not typed. Free text here
-            // used to look saved and match nothing, which is the one way to
-            // be twenty points out without a word of warning.
-            "plant_type" -> {
+            // Two words, so chips rather than a dropdown: both are visible
+            // at once and burying a plant is worth seeing before tapping.
+            "status" -> {
                 Labelled(field, model)
-                Kinds(draft, model)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    POT_STATUSES.forEach { s ->
+                        FilterChip(
+                            selected = (draft["status"] ?: ALIVE) == s.wire,
+                            onClick = { model.edit("status", s.wire) },
+                            label = { Text(s.label) },
+                        )
+                    }
+                }
             }
             "controller" -> {
                 ValueField(field, draft, model::edit, model)
@@ -524,7 +580,15 @@ private fun Form(
                 SpeciesPanel(screen, model)
             }
             "wet_raw" -> Unit
-            else -> ValueField(field, draft, model::edit, model)
+            // A closed set is picked, never typed. Free text on the plant
+            // kind used to look saved and match nothing, which is the one
+            // way to be twenty points out without a word of warning.
+            else ->
+                if (field.input == Input.PICK) {
+                    Picker(field, draft, model)
+                } else {
+                    ValueField(field, draft, model::edit, model)
+                }
         }
     }
 }
@@ -550,12 +614,70 @@ private fun ValueField(
 
 private fun keyboardFor(input: Input): KeyboardType =
     when (input) {
-        Input.TEXT -> KeyboardType.Text
         Input.INTEGER -> KeyboardType.Number
         // A measurement in centimetres is allowed a decimal point, and a
         // keyboard without one makes 14.5 impossible to type.
         Input.DECIMAL -> KeyboardType.Decimal
+        // PICK never reaches a keyboard; TEXT is the only one left that does.
+        else -> KeyboardType.Text
     }
+
+/** One closed set as a dropdown. The read-only field shows the LABEL and
+ * the draft holds the wire word, so renaming a choice on screen can never
+ * become a wire change.
+ *
+ * "Not said" is the first entry and a real answer, not a placeholder: for
+ * the plant kind it is the band an unlabelled plant already has, and for
+ * the soil it is ordinary potting compost, which is what every other value
+ * is measured against. It writes an empty draft value, which the wire
+ * cannot send — so it clears nothing that was already stored, and the form
+ * says so under Save rather than pretending otherwise. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Picker(field: Field, draft: Map<String, String>, model: GardenViewModel) {
+    val choices = choicesFor(field.key) ?: return
+    val chosen = draft[field.key].orEmpty()
+    var open by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        ExposedDropdownMenuBox(
+            expanded = open,
+            onExpandedChange = { open = it },
+            modifier = Modifier.weight(1f),
+        ) {
+            OutlinedTextField(
+                value = labelFor(field.key, chosen).ifEmpty { NOT_SAID },
+                onValueChange = {},
+                readOnly = true,
+                singleLine = true,
+                label = { Text(field.label) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = open) },
+                modifier =
+                    Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
+            )
+            ExposedDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                DropdownMenuItem(
+                    text = { Text(NOT_SAID) },
+                    onClick = {
+                        model.edit(field.key, "")
+                        open = false
+                    },
+                )
+                choices.forEach { choice ->
+                    DropdownMenuItem(
+                        text = { Text(choice.label) },
+                        onClick = {
+                            model.edit(field.key, choice.wire)
+                            open = false
+                        },
+                    )
+                }
+            }
+        }
+        Explain(field, model)
+    }
+}
+
+private const val NOT_SAID = "not said"
 
 /** The ⓘ. Small, and beside the thing it explains rather than in a help
  * screen nobody opens. */
@@ -576,25 +698,3 @@ private fun Labelled(field: Field, model: GardenViewModel) {
     }
 }
 
-/** The kinds, and Not sure, which is a real answer: it is the band an
- * unlabelled plant already had, and it is the honest state for a cutting
- * somebody handed you. */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun Kinds(draft: Map<String, String>, model: GardenViewModel) {
-    val chosen = draft["plant_type"].orEmpty()
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(
-            selected = PLANT_KINDS.none { it.wire == chosen },
-            onClick = { model.edit("plant_type", "") },
-            label = { Text("not sure") },
-        )
-        PLANT_KINDS.forEach { kind ->
-            FilterChip(
-                selected = chosen == kind.wire,
-                onClick = { model.edit("plant_type", kind.wire) },
-                label = { Text(kind.label) },
-            )
-        }
-    }
-}

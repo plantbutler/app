@@ -6,30 +6,36 @@ package garden.butler.app
  */
 const val ENV_PREFIX = "env:"
 
+/** The one status that waters. Everything else is an aside. */
+const val ALIVE = "alive"
+const val GRAVEYARD = "graveyard"
+
 data class Garden(
     val pots: List<Pot>,
     val env: List<Pot>,
-    /** Disabled pots stay reachable: a pot is switched off to be edited or
-     * re-enabled, not forgotten. */
-    val disabled: List<Pot>,
+    /** Pots that are not alive: the graveyard, and anything a newer backend
+     * calls something this build has never heard of. They stay reachable —
+     * a buried plant is brought back from its own form, and it still holds
+     * its nickname against a create. */
+    val graveyard: List<Pot>,
     val problems: List<String>,
     val health: Health,
 )
 
 /** Every pot the answer carried, in one list again: what the cache stores,
  * since splitting is a screen decision and a cache holds the answer. */
-fun Garden.all(): List<Pot> = pots + env + disabled
+fun Garden.all(): List<Pot> = pots + env + graveyard
 
 /** The pot as the last good read has it; null once it vanished, in which
  * case the open form keeps rendering from its own snapshot. Every screen
  * keys on the id, so a rename moves a nickname and not a pot. */
 fun Garden.potById(id: String): Pot? =
-    if (id.isEmpty()) null else (pots + disabled + env).firstOrNull { it.id == id }
+    if (id.isEmpty()) null else (pots + graveyard + env).firstOrNull { it.id == id }
 
 /** By nickname, for the two places that only have one: the wizard's "is
  * this pot still on the backend" check and the create-time name clash. */
 fun Garden.potNamed(name: String): Pot? =
-    (pots + disabled + env).firstOrNull { it.name == name }
+    (pots + graveyard + env).firstOrNull { it.name == name }
 
 /** A pot's key in the list. The id, which a rename does not move; a
  * backend too old to send one would give every row the same empty key, and
@@ -38,11 +44,14 @@ fun Garden.potNamed(name: String): Pot? =
 fun potKey(pot: Pot): String = pot.id.ifEmpty { "name:" + pot.name }
 
 fun splitGarden(all: List<Pot>, health: Health, nowS: Long): Garden {
-    val enabled = all.filter { it.enabled == 1 }
+    // `== ALIVE`, never `!= GRAVEYARD`. A third status one day, or a word
+    // from a backend newer than this build, then lands in the aside rather
+    // than in the list with a Water button under it.
+    val living = all.filter { it.status == ALIVE }
     return Garden(
-        pots = enabled.filterNot { it.name.startsWith(ENV_PREFIX) },
-        env = enabled.filter { it.name.startsWith(ENV_PREFIX) },
-        disabled = all.filter { it.enabled != 1 },
+        pots = living.filterNot { it.name.startsWith(ENV_PREFIX) },
+        env = living.filter { it.name.startsWith(ENV_PREFIX) },
+        graveyard = all.filter { it.status != ALIVE },
         problems = problems(health, nowS),
         health = health,
     )
@@ -198,7 +207,7 @@ fun needsVerdict(d: LastDose?, nowS: Long): Boolean {
 
 /** The nudge under a pot's row while its last dose waits for a verdict. */
 fun rowNote(pot: Pot, nowS: Long): String? {
-    if (pot.enabled != 1) return null
+    if (pot.status != ALIVE) return null
     val dose = pot.lastDose?.takeIf { needsVerdict(it, nowS) } ?: return null
     val ts = dose.ackedTs ?: dose.sentTs ?: return null
     return "dose ${agoText(ts, nowS)}, not judged yet"

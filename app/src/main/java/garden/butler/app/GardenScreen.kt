@@ -1,6 +1,8 @@
 package garden.butler.app
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -33,6 +36,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -97,6 +103,10 @@ private fun GardenList(
     model: GardenViewModel,
 ) {
     val nowS = System.currentTimeMillis() / 1000
+    // A long press, never a swipe: a swipe fires while the list is being
+    // scrolled, and one of these two actions cannot be taken back.
+    var sheetFor by remember { mutableStateOf<Pot?>(null) }
+    sheetFor?.let { RowActions(it, model) { sheetFor = null } }
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = model::refresh) {
         LazyColumn(Modifier.fillMaxSize()) {
             // The age has to be as loud as the numbers it qualifies: a
@@ -124,8 +134,10 @@ private fun GardenList(
             if (garden.env.isNotEmpty()) {
                 item { EnvCard(garden.env, nowS, model::open) }
             }
-            items(garden.pots, key = { potKey(it) }) { pot -> PotRow(pot, nowS, model::open) }
-            if (garden.pots.isEmpty() && garden.disabled.isEmpty() && garden.env.isEmpty()) {
+            items(garden.pots, key = { potKey(it) }) { pot ->
+                PotRow(pot, nowS, model::open) { sheetFor = pot }
+            }
+            if (garden.pots.isEmpty() && garden.graveyard.isEmpty() && garden.env.isEmpty()) {
                 item {
                     Text(
                         "No pots yet — tap + to plant one.",
@@ -134,16 +146,18 @@ private fun GardenList(
                     )
                 }
             }
-            if (garden.disabled.isNotEmpty()) {
+            if (garden.graveyard.isNotEmpty()) {
                 item {
                     Text(
-                        "Disabled",
+                        "Graveyard",
                         Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
-                items(garden.disabled, key = { "off:" + potKey(it) }) { pot ->
-                    Box(Modifier.alpha(0.6f)) { PotRow(pot, nowS, model::open) }
+                items(garden.graveyard, key = { "off:" + potKey(it) }) { pot ->
+                    Box(Modifier.alpha(0.6f)) {
+                        PotRow(pot, nowS, model::open) { sheetFor = pot }
+                    }
                 }
             }
         }
@@ -248,15 +262,64 @@ private fun EnvCard(env: List<Pot>, nowS: Long, open: (String) -> Unit) {
     }
 }
 
+/** The two things worth doing to a row without opening it. Both end up in
+ * the form anyway — this only saves the trip — so neither is destructive
+ * from here: Delete opens the pot and its confirmation lives there, beside
+ * the sentence that says what goes. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PotRow(pot: Pot, nowS: Long, open: (String) -> Unit) {
+private fun RowActions(pot: Pot, model: GardenViewModel, dismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = dismiss) {
+        Text(
+            pot.name,
+            Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        if (pot.status == ALIVE) {
+            ListItem(
+                headlineContent = { Text("Move to the graveyard") },
+                supportingContent = {
+                    Text("Keeps everything; frees its channel and its outlet.")
+                },
+                modifier =
+                    Modifier.clickable {
+                        dismiss()
+                        model.bury(pot.id)
+                    },
+            )
+        } else {
+            ListItem(
+                headlineContent = { Text("Bring it back") },
+                supportingContent = { Text("Comes back unwired: say where the new plant went.") },
+                modifier =
+                    Modifier.clickable {
+                        dismiss()
+                        model.revive(pot.id)
+                    },
+            )
+        }
+        ListItem(
+            headlineContent = { Text("Delete it") },
+            supportingContent = { Text("Opens the pot; it asks before erasing anything.") },
+            modifier =
+                Modifier.clickable {
+                    dismiss()
+                    model.open(pot.id)
+                },
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PotRow(pot: Pot, nowS: Long, open: (String) -> Unit, longPress: () -> Unit) {
     ListItem(
-        modifier = Modifier.clickable { open(pot.id) },
+        modifier = Modifier.combinedClickable(onClick = { open(pot.id) }, onLongClick = longPress),
         headlineContent = { Text(pot.name) },
         supportingContent = {
             Column {
                 Text(potLine(pot, nowS))
-                pot.proposal?.takeIf { pot.enabled == 1 }?.let {
+                pot.proposal?.takeIf { pot.status == ALIVE }?.let {
                     Text(
                         "proposal waiting: ${it.ml ?: "?"} ml",
                         style = MaterialTheme.typography.labelSmall,
