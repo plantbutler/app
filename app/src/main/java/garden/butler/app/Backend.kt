@@ -40,6 +40,60 @@ data class LastDose(
     val verdict: String? = null,
 )
 
+/** A target band the butler would offer this pot, and why in words. Only
+ * ever an offer: accepting it is an ordinary pot edit, so the numbers are
+ * written by the person who taps Apply and by nobody else. */
+@Serializable
+data class Advice(
+    val kind: String = "target",
+    val low: Int,
+    val high: Int,
+    val why: String = "",
+)
+
+/** What the care source knows about a species. Every field is optional and
+ * most are usually absent — for houseplants that is the ordinary answer,
+ * not a failure. `found` false means the source has never heard of it. */
+@Serializable
+data class Care(
+    val found: Boolean = false,
+    val source: String? = null,
+    val fetched: Long? = null,
+    @SerialName("common_name") val commonName: String? = null,
+    /** The source's own 0-10 scales. Not percentages, and not ours. */
+    val light: Int? = null,
+    val humidity: Int? = null,
+    @SerialName("ph_min") val phMin: Double? = null,
+    @SerialName("ph_max") val phMax: Double? = null,
+    @SerialName("temp_min_c") val tempMinC: Double? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+)
+
+/** One plant on the shortlist: what to call it, what people call it, and
+ * the photograph that settles which one it is. */
+@Serializable
+data class Candidate(
+    val name: String,
+    val common: String? = null,
+    val image: String? = null,
+    val slug: String = "",
+)
+
+/** What GET /species answers. `matched` is exact | fuzzy | common | genus |
+ * none | unavailable, `candidates` is the shortlist when no name could be
+ * placed, and `note` is the sentence to show: the backend words it, because
+ * most of the answers are unhappy and each in its own way. */
+@Serializable
+data class SpeciesAnswer(
+    val query: String = "",
+    val matched: String = "none",
+    val accepted: String? = null,
+    val rank: String? = null,
+    val care: Care? = null,
+    val candidates: List<Candidate> = emptyList(),
+    val note: String = "",
+)
+
 @Serializable
 data class Pot(
     /** The backend's own key, `pot-3f9a21`. Defaults to empty so a backend
@@ -69,6 +123,8 @@ data class Pot(
     @SerialName("read_ts") val readTs: Long? = null,
     val proposal: Proposal? = null,
     @SerialName("last_dose") val lastDose: LastDose? = null,
+    val advice: Advice? = null,
+    val care: Care? = null,
 )
 
 /** One row of the watering history: what was asked, what the meter
@@ -178,6 +234,8 @@ fun parseDoses(body: String): DosesAnswer = json.decodeFromString(body)
 
 fun parseHealth(body: String): Health = json.decodeFromString(body)
 
+fun parseSpecies(body: String): SpeciesAnswer = json.decodeFromString(body)
+
 /** The backend said no, in its own words: "refused: …", "busy: cmd=3
  * state=sent", "try again: …", "bad token". Shown verbatim; the backend's
  * merged-row checks are the validation. */
@@ -196,8 +254,12 @@ class Backend(private val baseUrl: String, private val token: String = "") {
             .readTimeout(10, TimeUnit.SECONDS)
             .build()
 
+    /** The token rides on reads too. Most of them do not need it — the
+     * backend gates writes, not reads — but /species spends the household's
+     * quota at a third party and asks for it. */
     private fun get(path: String): String {
-        val request = Request.Builder().url(baseUrl.trimEnd('/') + path).build()
+        val request =
+            Request.Builder().url(baseUrl.trimEnd('/') + path).header("X-Token", token).build()
         return answerOf(path, request)
     }
 
@@ -235,6 +297,15 @@ class Backend(private val baseUrl: String, private val token: String = "") {
     fun postPot(body: String): String = post("/pot", body)
 
     fun approve(cmdId: Long): String = post("/approve", "cmd=$cmdId")
+
+    /** What is known about a plant by name. Writes nothing: whatever the
+     * answer, the numbers are typed or tapped by a person afterwards. */
+    fun species(query: String): SpeciesAnswer =
+        parseSpecies(get("/species?q=" + URLEncoder.encode(query, "UTF-8")))
+
+    /** This offer was seen and refused. There is no accept — accepting is
+     * postPot() with the numbers, like any other edit. */
+    fun dismissAdvice(potId: String): String = post("/advice", "pot=$potId dismiss=1")
 
     fun verdict(cmdId: Long, verdict: String): String =
         post("/verdict", "cmd=$cmdId verdict=$verdict")

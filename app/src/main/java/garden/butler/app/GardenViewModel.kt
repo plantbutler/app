@@ -54,6 +54,11 @@ sealed interface Screen {
         /** The water command this form queued, followed until its fate is known. */
         val watering: Issued? = null,
         val waterRefused: String? = null,
+        /** The last species lookup made from this form. It is not stored
+         * anywhere: what the pot keeps is the name in draft["species"], and
+         * the garden carries the cached care beside it afterwards. */
+        val lookup: SpeciesAnswer? = null,
+        val lookingUp: Boolean = false,
     ) : Screen
 
     data class Calibrate(val parent: Pot, val cal: CalState) : Screen
@@ -80,6 +85,10 @@ sealed interface Screen {
 const val CALIBRATION_SAVED_NOTE =
     "calibration saved — keep the pot in manual for about five readings: " +
         "the rules' window still holds the air values"
+
+/** The two fields the offer would write. An unsaved edit to either of them
+ * would be silently overwritten by accepting it. */
+private val TARGET_KEYS = setOf("target_low_pct", "target_high_pct")
 
 private const val NO_ANSWER =
     "no answer from the butler — it may still have queued the dose; check the controllers card"
@@ -494,6 +503,74 @@ class GardenViewModel(
             }
             refresh()
         }
+    }
+
+    /** Ask what is known about the species in the form. Reads only — the
+     * answer is words on screen, and whatever the pot ends up storing is
+     * typed or tapped afterwards, so a stale cache is no reason to refuse. */
+    fun lookUpSpecies() {
+        val form = shown.value as? Screen.Pot ?: return
+        val typed = form.draft["species"].orEmpty().trim()
+        if (typed.isBlank()) {
+            return onPot(form) { it.copy(lookup = SpeciesAnswer(note = "type a species first")) }
+        }
+        onPot(form) { it.copy(lookingUp = true, lookup = null) }
+        viewModelScope.launch {
+            val answer =
+                try {
+                    withContext(Dispatchers.IO) { backend.species(normaliseSpecies(typed)) }
+                } catch (why: CancellationException) {
+                    throw why
+                } catch (why: Exception) {
+                    SpeciesAnswer(
+                        query = typed,
+                        matched = "unavailable",
+                        note = why.message ?: why.toString(),
+                    )
+                }
+            onPot(form) { it.copy(lookingUp = false, lookup = answer) }
+        }
+    }
+
+    /** Put the accepted name in the form: a synonym the plant was renamed
+     * from, or a spelling GBIF corrected. Typing, not saving — the form is
+     * dirty afterwards and Save is what stores it. */
+    fun useName(name: String) = onPot { it.copy(draft = it.draft + ("species" to tokenize(name))) }
+
+    /** Somebody recognised their plant in the shortlist. Put its name in the
+     * form and ask again: the second question resolves exactly, and both
+     * halves of the answer are already cached, so it costs one round trip. */
+    fun pickCandidate(name: String) {
+        useName(name)
+        lookUpSpecies()
+    }
+
+    /** Accept the offered band. This is the approval the pitch asks for, so
+     * it is an ordinary pot edit and nothing more: the same POST /pot the
+     * form makes, carrying the two numbers a person just agreed to. */
+    fun applyAdvice(advice: Advice) {
+        val form = shown.value as? Screen.Pot ?: return
+        val id = form.id ?: return noteOnPot(form, "save the pot first")
+        staleRefusal()?.let { why -> return noteOnPot(form, why) }
+        if (TARGET_KEYS.any { it in changedFields(form.original, form.draft) }) {
+            return noteOnPot(form, "save or discard your target edits first")
+        }
+        act({
+            backend.postPot("id=$id target_low_pct=${advice.low} target_high_pct=${advice.high}")
+            "target set to ${advice.low}-${advice.high}%"
+        }) { noteOnPot(form, it) }
+    }
+
+    /** Refuse the offer. Remembered against these numbers, so a repot or a
+     * change of season asks again rather than never asking. */
+    fun dismissAdvice() {
+        val form = shown.value as? Screen.Pot ?: return
+        val id = form.id ?: return
+        staleRefusal()?.let { why -> return noteOnPot(form, why) }
+        act({
+            backend.dismissAdvice(id)
+            "not now"
+        }) { noteOnPot(form, it) }
     }
 
     fun approve(cmdId: Long) {
