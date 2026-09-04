@@ -294,6 +294,23 @@ class PotFormTest {
     }
 
     @Test
+    fun `a decimal comma reaches the wire as a point`() {
+        // The keyboard on a phone set to Italian or German offers a comma
+        // and often no point at all, and the backend refuses anything but
+        // ASCII digits and one point — so without this the field is
+        // untypable on the phone this app was written for.
+        val original = mapOf("pot_diameter_cm" to "14")
+        val draft = mapOf("pot_diameter_cm" to "14,5")
+        assertEquals(mapOf("pot_diameter_cm" to "14.5"), changedFields(original, draft))
+        // Only where a decimal point means something: a comma in a name or
+        // a soil description is somebody's own words.
+        assertEquals(
+            mapOf("soil" to "loam,_gritty"),
+            changedFields(mapOf("soil" to "loam"), mapOf("soil" to "loam, gritty")),
+        )
+    }
+
+    @Test
     fun `a measurement loses its trailing zero on the way into the form`() {
         // 14.0 in a box the user is about to edit reads as precision nobody
         // measured — and it would make the form dirty the moment it opened.

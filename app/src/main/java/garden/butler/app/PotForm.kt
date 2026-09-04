@@ -263,13 +263,21 @@ fun tokenize(value: String): String =
         }
     }
 
-/** The keys worth sending: a non-empty tokenized draft value that differs
- * from what is stored. An emptied field is dropped, not nulled — the wire
- * has no way to null a column. Keys outside POT_FIELDS are ignored. */
+/** One field's value as the wire spells it. A decimal COMMA becomes a
+ * point: a phone keyboard set to a locale that writes 14,5 offers a comma
+ * and often no point at all, and the backend refuses anything that is not
+ * ASCII digits and one point — so the field would be untypable on half the
+ * phones in Europe, this one included. */
+fun wireValue(field: Field, value: String): String =
+    tokenize(value).let { if (field.input == Input.DECIMAL) it.replace(',', '.') else it }
+
+/** The keys worth sending: a non-empty draft value that differs from what
+ * is stored. An emptied field is dropped, not nulled — the wire has no way
+ * to null a column. Keys outside POT_FIELDS are ignored. */
 fun changedFields(original: Map<String, String>, draft: Map<String, String>): Map<String, String> {
     val out = linkedMapOf<String, String>()
     for (field in POT_FIELDS) {
-        val value = draft[field.key]?.let(::tokenize) ?: continue
+        val value = draft[field.key]?.let { wireValue(field, it) } ?: continue
         if (value.isNotEmpty() && value != original[field.key]) out[field.key] = value
     }
     return out
@@ -279,7 +287,7 @@ fun changedFields(original: Map<String, String>, draft: Map<String, String>): Ma
  * the form has to say the edit will not land rather than drop it silently. */
 fun emptiedFields(original: Map<String, String>, draft: Map<String, String>): List<Field> =
     POT_FIELDS.filter { field ->
-        original[field.key] != null && draft[field.key]?.let { tokenize(it).isEmpty() } == true
+        original[field.key] != null && draft[field.key]?.let { wireValue(field, it).isEmpty() } == true
     }
 
 /** A name that would land on another pot. The backend keeps nicknames
