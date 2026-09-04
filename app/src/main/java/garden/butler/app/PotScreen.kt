@@ -3,6 +3,8 @@ package garden.butler.app
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -94,6 +97,18 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                 model.followWater()
             }
         }
+    }
+    // One field's ⓘ. A dialog rather than a tooltip: it is the same
+    // gesture as everything else on this screen, it survives a rotation,
+    // and a long-press hint on a form nobody knows has hints is a hint
+    // nobody finds.
+    fieldFor(screen.explaining)?.let { field ->
+        AlertDialog(
+            onDismissRequest = model::stopExplaining,
+            title = { Text(field.label) },
+            text = { Text(field.help) },
+            confirmButton = { TextButton(onClick = model::stopExplaining) { Text("Got it") } },
+        )
     }
     if (askDiscard) {
         AlertDialog(
@@ -429,9 +444,10 @@ private fun Form(
     OutlinedTextField(
         value = draft["name"].orEmpty(),
         onValueChange = { model.edit("name", it) },
-        label = { Text("name") },
+        label = { Text(NAME_FIELD.label) },
         singleLine = true,
         enabled = !screen.saving,
+        trailingIcon = { Explain(NAME_FIELD, model) },
         modifier = Modifier.fillMaxWidth(),
     )
     if (collision) {
@@ -447,7 +463,11 @@ private fun Form(
     }
     for (field in POT_FIELDS) {
         when (field.key) {
-            "mode" ->
+            // Three bare chips with nothing above them said neither what
+            // they were nor that manual, learning and auto are three
+            // different amounts of trust.
+            "mode" -> {
+                Labelled(field, model)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MODES.forEach { m ->
                         FilterChip(
@@ -457,16 +477,25 @@ private fun Form(
                         )
                     }
                 }
+            }
             "enabled" ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Switch(
                         checked = (draft["enabled"] ?: "1") == "1",
                         onCheckedChange = { model.edit("enabled", if (it) "1" else "0") },
                     )
-                    Text("enabled")
+                    Text(field.label)
+                    Explain(field, model)
                 }
+            // A closed set, so it is picked and not typed. Free text here
+            // used to look saved and match nothing, which is the one way to
+            // be twenty points out without a word of warning.
+            "plant_type" -> {
+                Labelled(field, model)
+                Kinds(draft, model)
+            }
             "controller" -> {
-                ValueField(field, draft, model::edit)
+                ValueField(field, draft, model::edit, model)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     controllers.forEach { c ->
                         AssistChip(onClick = { model.edit("controller", c) }, label = { Text(c) })
@@ -475,8 +504,14 @@ private fun Form(
             }
             "dry_raw" ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ValueField(field, draft, model::edit, Modifier.weight(1f))
-                    ValueField(POT_FIELDS.first { it.key == "wet_raw" }, draft, model::edit, Modifier.weight(1f))
+                    ValueField(field, draft, model::edit, model, Modifier.weight(1f))
+                    ValueField(
+                        POT_FIELDS.first { it.key == "wet_raw" },
+                        draft,
+                        model::edit,
+                        model,
+                        Modifier.weight(1f),
+                    )
                     Button(
                         onClick = model::startCalibration,
                         enabled = screen.id != null && !screen.saving && !dirty && live,
@@ -485,11 +520,11 @@ private fun Form(
                     }
                 }
             "species" -> {
-                ValueField(field, draft, model::edit)
+                ValueField(field, draft, model::edit, model)
                 SpeciesPanel(screen, model)
             }
             "wet_raw" -> Unit
-            else -> ValueField(field, draft, model::edit)
+            else -> ValueField(field, draft, model::edit, model)
         }
     }
 }
@@ -499,6 +534,7 @@ private fun ValueField(
     field: Field,
     draft: Map<String, String>,
     edit: (String, String) -> Unit,
+    model: GardenViewModel,
     modifier: Modifier = Modifier.fillMaxWidth(),
 ) {
     OutlinedTextField(
@@ -506,8 +542,59 @@ private fun ValueField(
         onValueChange = { edit(field.key, it) },
         label = { Text(field.label) },
         singleLine = true,
-        keyboardOptions =
-            KeyboardOptions(keyboardType = if (field.numeric) KeyboardType.Number else KeyboardType.Text),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardFor(field.input)),
+        trailingIcon = { Explain(field, model) },
         modifier = modifier,
     )
+}
+
+private fun keyboardFor(input: Input): KeyboardType =
+    when (input) {
+        Input.TEXT -> KeyboardType.Text
+        Input.INTEGER -> KeyboardType.Number
+        // A measurement in centimetres is allowed a decimal point, and a
+        // keyboard without one makes 14.5 impossible to type.
+        Input.DECIMAL -> KeyboardType.Decimal
+    }
+
+/** The ⓘ. Small, and beside the thing it explains rather than in a help
+ * screen nobody opens. */
+@Composable
+private fun Explain(field: Field, model: GardenViewModel) {
+    IconButton(onClick = { model.explain(field.key) }) {
+        Icon(Icons.Filled.Info, "What is ${field.label}?")
+    }
+}
+
+/** A label with its own ⓘ, for the controls that are not a text field and
+ * so have nowhere to hang one. */
+@Composable
+private fun Labelled(field: Field, model: GardenViewModel) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(field.label, style = MaterialTheme.typography.labelLarge)
+        Explain(field, model)
+    }
+}
+
+/** The kinds, and Not sure, which is a real answer: it is the band an
+ * unlabelled plant already had, and it is the honest state for a cutting
+ * somebody handed you. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Kinds(draft: Map<String, String>, model: GardenViewModel) {
+    val chosen = draft["plant_type"].orEmpty()
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = PLANT_KINDS.none { it.wire == chosen },
+            onClick = { model.edit("plant_type", "") },
+            label = { Text("not sure") },
+        )
+        PLANT_KINDS.forEach { kind ->
+            FilterChip(
+                selected = chosen == kind.wire,
+                onClick = { model.edit("plant_type", kind.wire) },
+                label = { Text(kind.label) },
+            )
+        }
+    }
 }

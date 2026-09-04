@@ -224,14 +224,85 @@ class PotFormTest {
     fun `the field list is the wire in order`() {
         assertEquals(
             listOf(
-                "controller", "channel", "outlet", "species", "plant_type", "plant_size", "pot_size",
-                "soil", "dry_raw", "wet_raw", "target_low_pct", "target_high_pct", "dose_ml",
-                "cooldown_h", "daily_cap_ml", "mode", "enabled",
+                "controller", "channel", "outlet", "species", "plant_type", "plant_height_cm",
+                "pot_diameter_cm", "soil", "dry_raw", "wet_raw", "target_low_pct",
+                "target_high_pct", "dose_ml", "cooldown_h", "daily_cap_ml", "mode", "enabled",
             ),
             POT_FIELDS.map { it.key },
         )
         assertEquals("target low %", POT_FIELDS.first { it.key == "target_low_pct" }.label)
-        assertEquals(true, POT_FIELDS.first { it.key == "dose_ml" }.numeric)
-        assertEquals(false, POT_FIELDS.first { it.key == "mode" }.numeric)
+        assertEquals(Input.INTEGER, POT_FIELDS.first { it.key == "dose_ml" }.input)
+        assertEquals(Input.TEXT, POT_FIELDS.first { it.key == "mode" }.input)
+        // A measurement wants a keyboard with a point on it.
+        assertEquals(Input.DECIMAL, POT_FIELDS.first { it.key == "pot_diameter_cm" }.input)
+    }
+
+    @Test
+    fun `the label of a measurement says what it is measured in`() {
+        // The field this replaces was called "pot size" and read the words
+        // small and large, so 14cm — the README's own example, and the "3"
+        // in the live garden — moved the band by nothing at all.
+        assertEquals("pot diameter (cm)", POT_FIELDS.first { it.key == "pot_diameter_cm" }.label)
+        assertEquals("plant height (cm)", POT_FIELDS.first { it.key == "plant_height_cm" }.label)
+    }
+
+    @Test
+    fun `every field can explain itself, and the name too`() {
+        // A form of seventeen boxes labelled in wire names is a form only
+        // its author can fill in.
+        for (field in POT_FIELDS + NAME_FIELD) {
+            assertTrue(field.help.length > 40, "${field.key}: ${field.help}")
+            assertTrue(field.help.trim().endsWith("."), "${field.key} is not a sentence")
+        }
+    }
+
+    @Test
+    fun `an info button belongs to a field, or to nothing`() {
+        assertEquals("mode", fieldFor("mode")?.key)
+        assertEquals("name", fieldFor("name")?.key)
+        // A key no form has: a screen state left behind by an older build.
+        assertNull(fieldFor("pot_size"))
+        assertNull(fieldFor(null))
+    }
+
+    @Test
+    fun `the kinds are the ones the backend accepts`() {
+        // Six wire words, and they are the backend's, not the labels'. A
+        // label is free to change; one of these is a 400.
+        assertEquals(
+            listOf("succulent", "fern", "herb", "vegetable", "tropical", "flower"),
+            PLANT_KINDS.map { it.wire },
+        )
+        assertTrue(PLANT_KINDS.all { it.label.isNotBlank() })
+    }
+
+    @Test
+    fun `a suggested kind fills an empty field and never overwrites one`() {
+        val empty = mapOf("name" to "basil")
+        assertEquals("herb", withKind(empty, "herb")["plant_type"])
+        // Somebody typed succulent. A guess read off a botanical family
+        // does not get to overrule that; it is offered instead.
+        val answered = mapOf("plant_type" to "succulent")
+        assertEquals("succulent", withKind(answered, "herb")["plant_type"])
+        assertEquals("herb", suggestedKind(answered, "herb"))
+        // Nothing to offer when the field already agrees, or when the
+        // lookup had no idea, or when it named something no chip shows.
+        assertNull(suggestedKind(mapOf("plant_type" to "herb"), "herb"))
+        assertNull(suggestedKind(empty, null))
+        assertNull(suggestedKind(empty, "orchid"))
+        assertEquals(empty, withKind(empty, "orchid"))
+    }
+
+    @Test
+    fun `a measurement loses its trailing zero on the way into the form`() {
+        // 14.0 in a box the user is about to edit reads as precision nobody
+        // measured — and it would make the form dirty the moment it opened.
+        assertEquals("14", cmText(14.0))
+        assertEquals("14.5", cmText(14.5))
+        assertNull(cmText(null))
+        val pot = Pot(id = "pot-1", name = "basil", potDiameterCm = 14.0, plantHeightCm = 21.5)
+        assertEquals("14", wireFields(pot)["pot_diameter_cm"])
+        assertEquals("21.5", wireFields(pot)["plant_height_cm"])
+        assertFalse(formDirty(draftOf(pot), draftOf(pot)))
     }
 }

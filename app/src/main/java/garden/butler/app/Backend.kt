@@ -90,6 +90,10 @@ data class SpeciesAnswer(
     val matched: String = "none",
     val accepted: String? = null,
     val rank: String? = null,
+    /** Which of the form's kinds to pre-select, read off the botanical
+     * family. A guess, and null far more often than not — an unlisted
+     * family means nobody knows, and "not sure" already behaves well. */
+    val kind: String? = null,
     val care: Care? = null,
     val candidates: List<Candidate> = emptyList(),
     val note: String = "",
@@ -107,8 +111,8 @@ data class Pot(
     val channel: Int? = null,
     val outlet: Int? = null,
     @SerialName("plant_type") val plantType: String? = null,
-    @SerialName("plant_size") val plantSize: String? = null,
-    @SerialName("pot_size") val potSize: String? = null,
+    @SerialName("plant_height_cm") val plantHeightCm: Double? = null,
+    @SerialName("pot_diameter_cm") val potDiameterCm: Double? = null,
     val soil: String? = null,
     @SerialName("dry_raw") val dryRaw: Long? = null,
     @SerialName("wet_raw") val wetRaw: Long? = null,

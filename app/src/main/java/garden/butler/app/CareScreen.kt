@@ -55,6 +55,14 @@ fun SpeciesPanel(screen: Screen.Pot, model: GardenViewModel) {
         }
     }
     Text(answer.note, style = MaterialTheme.typography.bodySmall)
+    // The kind the family suggests, when the form already holds a different
+    // one. An empty field was filled the moment the answer landed; this is
+    // the other half, and it is a tap rather than an overwrite because what
+    // is in the field is a human's answer.
+    suggestedKind(screen.draft, answer.kind)?.let { kind ->
+        val label = PLANT_KINDS.firstOrNull { it.wire == kind }?.label ?: kind
+        TextButton(onClick = { model.useKind(kind) }) { Text("Set kind to $label") }
+    }
     // Only when it differs from what is typed: the pot should hold the name
     // the caches are keyed on, so the garden can show this again later.
     betterName(answer, screen.draft["species"].orEmpty())?.let { name ->
