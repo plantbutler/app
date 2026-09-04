@@ -77,6 +77,12 @@ dependencies {
     // The only picture the app loads: the care source's photograph of a
     // species, so somebody searching by common name can confirm by eye.
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // FileProvider, for handing the camera app somewhere to write, and
+    // ExifInterface, because a phone writes the sensor's orientation into a
+    // tag rather than into the pixels — re-encoding drops it, and without
+    // this every portrait picture would come back on its side for good.
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test:2.1.0")

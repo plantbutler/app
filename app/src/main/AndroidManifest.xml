@@ -10,6 +10,21 @@
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- The camera app writes the full-size picture here before the
+             app shrinks it. Not exported, one grant per capture. No CAMERA
+             permission is declared, and none is needed: ACTION_IMAGE_CAPTURE
+             through the system camera only requires one from an app that
+             asks for it in its own manifest. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.photos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:exported="true">
