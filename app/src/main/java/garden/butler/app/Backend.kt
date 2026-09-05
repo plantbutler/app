@@ -222,6 +222,14 @@ data class InFlight(
     val state: String = "queued",
 )
 
+/** The butler has stopped watering this board until a person resumes it:
+ * when, and the board's own word for why (contra | resetmid). */
+@Serializable
+data class Latch(
+    val since: Long = 0,
+    val reason: String = "",
+)
+
 @Serializable
 data class ControllerHealth(
     val controller: Int,
@@ -230,6 +238,14 @@ data class ControllerHealth(
     val float: Int? = null,
     val pos: String? = null,
     val command: InFlight? = null,
+    val latched: Latch? = null,
+    @SerialName("last_refill") val lastRefill: Long? = null,
+    /** The board's last safety error token, as it sent it. */
+    val err: String? = null,
+    @SerialName("err_ts") val errTs: Long? = null,
+    val retired: Int = 0,
+    /** When the board last said pos=ok; null for one that never has. */
+    @SerialName("pos_ok_seen") val posOkSeen: Long? = null,
 )
 
 @Serializable
@@ -305,6 +321,10 @@ class Refused(val code: Int, val text: String) : Exception(text)
 /** `next=120` as POST /interval answers it; null when it is not that. */
 fun parseNextAnswer(answer: String): Int? =
     answer.trim().removePrefix("next=").takeIf { it != answer.trim() }?.toIntOrNull()
+
+/** `refill=1757000000` as POST /refill answers it; null when it is not that. */
+fun parseRefillAnswer(answer: String): Long? =
+    answer.trim().removePrefix("refill=").takeIf { it != answer.trim() }?.toLongOrNull()
 
 /** The one place that touches the network. Blocking calls: the view model
  * runs them on Dispatchers.IO.
@@ -492,6 +512,13 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
      * effective interval the backend answered with. */
     fun interval(controller: Int, nextS: Int): Int? =
         parseNextAnswer(post("/interval", "c=$controller next=$nextS"))
+
+    /** The human says the tank was refilled; the butler records when. */
+    fun refill(controller: Int): Long? = parseRefillAnswer(post("/refill", "c=$controller"))
+
+    /** The human says the tank was checked; the butler waters again. Answers
+     * `resumed=<n>`, idempotent on a board that was not stopped. */
+    fun resume(controller: Int): String = post("/resume", "c=$controller")
 
     private companion object {
         val TEXT = "text/plain; charset=utf-8".toMediaType()

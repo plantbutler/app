@@ -77,6 +77,20 @@ class BackendWireTest {
         }
 
     @Test
+    fun `refill and resume post the board and nothing else`() =
+        withServer { server, backend ->
+            server.enqueue(MockResponse().setBody("refill=1757000000\n"))
+            server.enqueue(MockResponse().setBody("resumed=0\n"))
+            assertEquals(1757000000L, backend.refill(0))
+            assertEquals("resumed=0", backend.resume(0))
+            val refill = server.takeRequest()
+            assertEquals("/refill" to "c=0", refill.path to refill.body.readUtf8())
+            assertEquals("s3cret", refill.getHeader("X-Token"))
+            val resume = server.takeRequest()
+            assertEquals("/resume" to "c=0", resume.path to resume.body.readUtf8())
+        }
+
+    @Test
     fun `pots come back through a real GET`() =
         withServer { server, backend ->
             server.enqueue(
