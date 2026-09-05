@@ -52,6 +52,7 @@ class GardenViewModelTest {
         @Volatile var proposal = false
         @Volatile var lastDose: String? = null
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
+        @Volatile var resumeAnswer = MockResponse().setBody("resumed=0\n")
         /** What b1's one slot holds, as /health shows it. */
         @Volatile var slot: String? = null
         /** The band the backend would offer pot-1, as /pots carries it. */
@@ -103,6 +104,8 @@ class GardenViewModelTest {
                     potAnswer
                 }
                 "/command" -> commandAnswer
+                "/refill" -> MockResponse().setBody("refill=1757000000\n")
+                "/resume" -> resumeAnswer
                 "/photo/delete" -> {
                     photos.remove(
                         request.body.copy().readUtf8().trim().removePrefix("photo="),
@@ -1094,6 +1097,30 @@ class GardenViewModelTest {
         val note = waitFor("the note") { model.listNote.value }
         assertEquals(true, note.startsWith("the butler is not answering"))
         assertEquals(emptyList(), butler.posts().toList())
+    }
+
+    @Test
+    fun `refill and resume post the board and land a note on the list`() {
+        ready()
+        onMain { refill(0) }
+        var note = waitFor("the refill note") { model.listNote.value }
+        assertEquals("board 0: refill noted", note)
+        val refill = waitFor("the post") { butler.posts().firstOrNull { it.path == "/refill" } }
+        assertEquals("c=0", refill.body.copy().readUtf8())
+        onMain { resume(0) }
+        note = waitFor("the resume note") { model.listNote.value?.takeIf { it != "board 0: refill noted" } }
+        assertEquals("board 0 waters again", note)
+        val resume = waitFor("the post") { butler.posts().firstOrNull { it.path == "/resume" } }
+        assertEquals("c=0", resume.body.copy().readUtf8())
+        waitFor("the refresh after it") { butler.sent("/pots").getOrNull(2) }
+    }
+
+    @Test
+    fun `a refusal from resume lands verbatim`() {
+        butler.resumeAnswer = MockResponse().setResponseCode(503).setBody("try again: locked\n")
+        ready()
+        onMain { resume(0) }
+        assertEquals("try again: locked", waitFor("the note") { model.listNote.value })
     }
 
     @Test
