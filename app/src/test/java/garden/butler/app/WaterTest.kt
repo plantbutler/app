@@ -95,7 +95,7 @@ class WaterTest {
     fun `a stopped board refuses after silence and before the busy slot`() {
         val stopped = controller(command = InFlight(3, state = "sent"), latched = Latch(900, "contra"))
         assertEquals(
-            "board 0 stopped watering (the float said full and the meter saw nothing) — check the tank, then resume it on the garden screen",
+            "board 0 stopped watering (the float said full and the meter saw nothing) — check the tank, type clear contra on the board, then resume it on the garden screen",
             cannotWater(ready, stopped, 1000, 60, emptySet()),
         )
         val silentAndStopped = controller(lastSeen = 10, latched = Latch(900, "contra"))

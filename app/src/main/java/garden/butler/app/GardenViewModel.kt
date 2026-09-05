@@ -964,7 +964,7 @@ class GardenViewModel(
     private fun resetIntervalNow(controller: Int) =
         act({
             val next = backend.interval(controller, 0)
-            "$controller reports every ${next ?: "default"}s again"
+            "${boardName(controller)} reports every ${next ?: "default"}s again"
         }) { noteOnList.value = it }
 
     /** The human refilled the tank: the butler records when, and the

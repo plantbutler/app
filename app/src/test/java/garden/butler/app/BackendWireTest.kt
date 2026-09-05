@@ -81,7 +81,7 @@ class BackendWireTest {
         withServer { server, backend ->
             server.enqueue(MockResponse().setBody("refill=1757000000\n"))
             server.enqueue(MockResponse().setBody("resumed=0\n"))
-            assertEquals(1757000000L, backend.refill(0))
+            assertEquals("refill=1757000000", backend.refill(0))
             assertEquals("resumed=0", backend.resume(0))
             val refill = server.takeRequest()
             assertEquals("/refill" to "c=0", refill.path to refill.body.readUtf8())

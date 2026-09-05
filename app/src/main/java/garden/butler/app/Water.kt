@@ -47,7 +47,7 @@ fun cannotWater(
         return "$c is silent (last reported ${agoText(controller.lastSeen, nowS)})"
     }
     controller.latched?.let {
-        return "$c stopped watering (${latchReason(it.reason)}) — check the tank, then resume it on the garden screen"
+        return "$c stopped watering (${latchReason(it.reason)}) — $LATCH_STEPS it on the garden screen"
     }
     controller.command?.let { return "busy: cmd ${it.id} ${it.state} on $c" }
     if (pot.proposal != null) return "a proposal is waiting above — approve it or let it expire"

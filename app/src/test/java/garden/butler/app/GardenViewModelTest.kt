@@ -117,7 +117,12 @@ class GardenViewModelTest {
                     deleted += request.body.copy().readUtf8().trim().removePrefix("id=")
                     MockResponse().setBody("ok\n")
                 }
-                "/interval" -> MockResponse().setBody("next=${request.body.copy().readUtf8().substringAfter("next=")}\n")
+                "/interval" -> {
+                    // As the backend answers: the effective pace, and next=0
+                    // clears the override back to next_default.
+                    val asked = request.body.copy().readUtf8().substringAfter("next=").trim().toInt()
+                    MockResponse().setBody("next=${if (asked == 0) 60 else asked}\n")
+                }
                 else ->
                     if (request.path?.startsWith("/photos") == true) {
                         if (failPhotos) {
@@ -1087,16 +1092,33 @@ class GardenViewModelTest {
         assertEquals(listOf("basil"), shown.garden.pots.map { it.name })
     }
 
-    @Test
-    fun `the reset chip is refused while the screen is a memory`() {
+    /** A write from a cached garden is refused before anything is posted. */
+    private fun refusedAsMemory(action: GardenViewModel.() -> Unit) {
         val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
         model = withCache(cache)
         onMain { openCache() }
         waitFor("the cached garden") { model.state.value as? UiState.Ready }
-        onMain { resetInterval(0) }
+        onMain(action)
         val note = waitFor("the note") { model.listNote.value }
         assertEquals(true, note.startsWith("the butler is not answering"))
         assertEquals(emptyList(), butler.posts().toList())
+    }
+
+    @Test
+    fun `the reset chip is refused while the screen is a memory`() = refusedAsMemory { resetInterval(0) }
+
+    @Test
+    fun `the refilled chip is refused while the screen is a memory`() = refusedAsMemory { refill(0) }
+
+    @Test
+    fun `resume is refused while the screen is a memory`() = refusedAsMemory { resume(0) }
+
+    @Test
+    fun `the reset chip names the board and the pace it is back to`() {
+        ready()
+        onMain { resetInterval(0) }
+        assertEquals("board 0 reports every 60s again", waitFor("the note") { model.listNote.value })
+        assertEquals("c=0 next=0", butler.sent("/interval").single().body.readUtf8())
     }
 
     @Test

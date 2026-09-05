@@ -82,12 +82,6 @@ class BackendTest {
     }
 
     @Test
-    fun `the refill answer is a timestamp or nothing`() {
-        assertEquals(1757000000L, parseRefillAnswer("refill=1757000000\n"))
-        assertNull(parseRefillAnswer("ok\n"))
-    }
-
-    @Test
     fun `an empty garden parses to an empty list`() {
         assertEquals(emptyList(), parsePots("""{"pots": []}"""))
     }

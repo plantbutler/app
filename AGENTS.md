@@ -66,14 +66,19 @@ is on screen. Nothing is queued to send later.
   `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`)),
   `Json { ignoreUnknownKeys }`, and the one class that touches the network: GETs, `post()` for
   `/pot`, `/approve`, `/verdict`, `/interval` with the `X-Token` header, and `refill()` and
-  `resume()` (`POST /refill` and `POST /resume`, body `c=<n>`). Any non-200 throws
+  `resume()` (`POST /refill` and `POST /resume`, body `c=<n>`, both handing back the raw
+  answer — `refill=<ts>`, `resumed=<n>` — since the app only reports that it went through;
+  `parseNextAnswer` is the one answer that is read). Any non-200 throws
   `Refused(code, text)` carrying the backend's text verbatim ("refused: …", "busy: …", "try
   again: …"); the app shows it as is. The backend's merged-row checks are the validation.
 - `Garden.kt` — pure lines and splits: `splitGarden` (pots / env / disabled + the health it
   came with), `problems` (raised alerts + app-side silence with `next_default`, a stopped
   board, and the pos line gated on `pos_ok_seen`), the latch and stale alert descriptions, the
   controller line with the STOPPED and retired marks on it, `latchLine`/`latchReason` (the
-  board's reason in a person's words), proposal and dose lines, `needsVerdict` (a dose acked
+  board's reason in a person's words) and `LATCH_STEPS` (what to do about a stopped board —
+  check the tank, type clear contra on the board, then resume — said once, because the water
+  button's refusal in `Water.kt` repeats it and used to drop the `clear contra` step, without
+  which a resume re-latches at the next report), proposal and dose lines, `needsVerdict` (a dose acked
   between 30 min and 48 h ago with no verdict), `learningGaps` (what the rules need, including
   the board's `float=1 pos=ok`), `potById` (the key everything navigates by; an empty id is
   never a key) and `potNamed` (only the two places that have a name and not an id).

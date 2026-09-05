@@ -322,10 +322,6 @@ class Refused(val code: Int, val text: String) : Exception(text)
 fun parseNextAnswer(answer: String): Int? =
     answer.trim().removePrefix("next=").takeIf { it != answer.trim() }?.toIntOrNull()
 
-/** `refill=1757000000` as POST /refill answers it; null when it is not that. */
-fun parseRefillAnswer(answer: String): Long? =
-    answer.trim().removePrefix("refill=").takeIf { it != answer.trim() }?.toLongOrNull()
-
 /** The one place that touches the network. Blocking calls: the view model
  * runs them on Dispatchers.IO.
  *
@@ -513,8 +509,10 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
     fun interval(controller: Int, nextS: Int): Int? =
         parseNextAnswer(post("/interval", "c=$controller next=$nextS"))
 
-    /** The human says the tank was refilled; the butler records when. */
-    fun refill(controller: Int): Long? = parseRefillAnswer(post("/refill", "c=$controller"))
+    /** The human says the tank was refilled; the butler records when and
+     * answers `refill=<ts>`. Raw, like resume(): the app only reports that
+     * it went through. */
+    fun refill(controller: Int): String = post("/refill", "c=$controller")
 
     /** The human says the tank was checked; the butler waters again. Answers
      * `resumed=<n>`, idempotent on a board that was not stopped. */

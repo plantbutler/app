@@ -109,13 +109,18 @@ private val LATCH_WORDS =
 
 fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
 
+/** What to do about a stopped board, said once: the card under the board
+ * and the water button's refusal must not disagree about the middle step,
+ * the one without which a resume re-latches at the board's next report. */
+const val LATCH_STEPS = "check the tank, type clear contra on the board, then resume"
+
 /** The card under a stopped board: why, since when, and the three things to
  * do — two of which are not in this app. */
 fun latchLine(c: ControllerHealth, nowS: Long): String {
     val latch = c.latched ?: return ""
     val since = if (latch.since in 1..nowS) " ${agoText(latch.since, nowS)}" else ""
     return "${boardName(c.controller)} stopped watering$since: ${latchReason(latch.reason)}. " +
-        "Check the tank, type clear contra on the board, then resume."
+        LATCH_STEPS.replaceFirstChar { it.uppercase() } + "."
 }
 
 fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
