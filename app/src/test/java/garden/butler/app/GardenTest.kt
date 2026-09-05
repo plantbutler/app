@@ -197,6 +197,15 @@ class GardenTest {
     }
 
     @Test
+    fun `an empty reservoir the backend has not paged for yet is spelt like the alert`() {
+        // The instant line and describeAlert("float:0") must read the same:
+        // the strip shows one or the other depending on the ticker's timing.
+        val health =
+            Health(ok = true, controllers = listOf(controller(lastSeen = 990, float = 0, pos = "ok")))
+        assertEquals(listOf("reservoir empty on board 0"), problems(health, nowS = 1000))
+    }
+
+    @Test
     fun `instant float and pos lines are deduplicated against raised alerts`() {
         val health =
             Health(
