@@ -63,7 +63,7 @@ is on screen. Nothing is queued to send later.
 - `Backend.kt` — the wire models (`Pot` with its `pot-xxxxxx` id, its nickname, `species` and
   every other pots column, `Proposal`, `LastDose`,
   `Health` with `next_default` and per-controller `command`, `Latch` and the tank fields on
-  `ControllerHealth` (`latched`, `last_refill`, `err`, `retired`, `pos_ok_seen`)),
+  `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`)),
   `Json { ignoreUnknownKeys }`, and the one class that touches the network: GETs, `post()` for
   `/pot`, `/approve`, `/verdict`, `/interval` with the `X-Token` header, and `refill()` and
   `resume()` (`POST /refill` and `POST /resume`, body `c=<n>`). Any non-200 throws
