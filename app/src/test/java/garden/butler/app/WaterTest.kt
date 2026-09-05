@@ -13,7 +13,8 @@ private fun controller(
     lastSeen: Long = 990,
     nextS: Int? = null,
     command: InFlight? = null,
-) = ControllerHealth(0, lastSeen = lastSeen, nextS = nextS, command = command)
+    latched: Latch? = null,
+) = ControllerHealth(0, lastSeen = lastSeen, nextS = nextS, command = command, latched = latched)
 
 private fun dose(id: Long, state: String, flowMl: Int? = null) =
     LastDose(id, ml = 100, flowMl = flowMl, state = state)
@@ -88,6 +89,17 @@ class WaterTest {
             "a proposal is waiting above — approve it or let it expire",
             cannotWater(proposed, controller(), 1000, 60, emptySet()),
         )
+    }
+
+    @Test
+    fun `a stopped board refuses after silence and before the busy slot`() {
+        val stopped = controller(command = InFlight(3, state = "sent"), latched = Latch(900, "contra"))
+        assertEquals(
+            "board 0 stopped watering (the float said full and the meter saw nothing) — check the tank, then resume it on the garden screen",
+            cannotWater(ready, stopped, 1000, 60, emptySet()),
+        )
+        val silentAndStopped = controller(lastSeen = 10, latched = Latch(900, "contra"))
+        assertTrue(cannotWater(ready, silentAndStopped, 1000, 60, emptySet())!!.startsWith("board 0 is silent"))
     }
 
     @Test

@@ -72,6 +72,7 @@ fun problems(health: Health, nowS: Long): List<String> {
     val raised = health.alerts.map { it.key }.toSet()
     health.alerts.mapTo(found) { describeAlert(it.key, nowS, it.raisedTs) }
     for (c in health.controllers) {
+        if (c.retired == 1) continue // a retired board is quiet by choice
         val threshold = silentAfterS(c.nextS, health.nextDefault)
         if (c.lastSeen == 0L) {
             found += "${boardName(c.controller)} has never reported"
@@ -81,10 +82,15 @@ fun problems(health: Health, nowS: Long): List<String> {
             found += "${boardName(c.controller)} last reported ${agoText(c.lastSeen, nowS)}"
         }
         if (c.float == 0 && "float:${c.controller}" !in raised) {
-            found += "reservoir empty on ${c.controller}"
+            found += "reservoir empty on ${boardName(c.controller)}"
         }
-        if (c.pos == "unknown" && "pos:${c.controller}" !in raised) {
-            found += "${c.controller} lost its manifold position"
+        if (c.pos == "unknown" && c.posOkSeen != null && "pos:${c.controller}" !in raised) {
+            found += "${boardName(c.controller)} lost its manifold position"
+        }
+        c.latched?.let { latch ->
+            if ("latch:${c.controller}" !in raised) {
+                found += "${boardName(c.controller)} stopped watering: ${latchReason(latch.reason)}"
+            }
         }
     }
     return found
@@ -93,6 +99,24 @@ fun problems(health: Health, nowS: Long): List<String> {
 /** A board as a person reads it. The controller is an integer on the wire,
  * and a bare "0 has gone silent" reads like a truncated sentence. */
 fun boardName(controller: Int): String = "board $controller"
+
+/** The board's own word for why the butler stopped, in a person's words. */
+private val LATCH_WORDS =
+    mapOf(
+        "contra" to "the float said full and the meter saw nothing",
+        "resetmid" to "it reset with the pump running",
+    )
+
+fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
+
+/** The card under a stopped board: why, since when, and the three things to
+ * do — two of which are not in this app. */
+fun latchLine(c: ControllerHealth, nowS: Long): String {
+    val latch = c.latched ?: return ""
+    val since = if (latch.since in 1..nowS) " ${agoText(latch.since, nowS)}" else ""
+    return "${boardName(c.controller)} stopped watering$since: ${latchReason(latch.reason)}. " +
+        "Check the tank, type clear contra on the board, then resume."
+}
 
 fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
     val parts = key.split(":")
@@ -105,6 +129,8 @@ fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
         "silent" -> "${board(1)} has gone silent$since"
         "float" -> "reservoir empty on ${board(1)}$since"
         "pos" -> "${board(1)} lost its manifold position$since"
+        "latch" -> "${board(1)} stopped watering$since"
+        "stale" -> "the float on ${board(1)} never moved across the refill$since"
         "sensor" ->
             "sensor ch${parts.getOrElse(2) { "?" }} on ${board(1)} stopped reporting$since"
         "fields" ->
@@ -161,8 +187,9 @@ fun envEntry(pot: Pot): Pair<String, String> {
 
 /** One line per controller on the health list: "board 0 · seen 40s ago ·
  * every 60s · float ok · pos ok", plus the command in flight when there is
- * one. The number is spelt "board 0" wherever a person reads it: bare, an
- * integer controller reads like a stray digit. */
+ * one, then STOPPED while the butler has stopped watering it and retired
+ * when a person has retired it. The number is spelt "board 0" wherever a
+ * person reads it: bare, an integer controller reads like a stray digit. */
 fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
     val seen = if (c.lastSeen == 0L) "never reported" else "seen ${agoText(c.lastSeen, nowS)}"
     val every = c.nextS?.let { "every ${it}s (override)" } ?: "every ${defaultNextS}s"
@@ -178,6 +205,8 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
         val kind = if (cmd.kind == "water") "" else " ${cmd.kind}"
         parts += "cmd ${cmd.id}$kind ${cmd.state}"
     }
+    if (c.latched != null) parts += "STOPPED"
+    if (c.retired == 1) parts += "retired"
     return parts.joinToString(" · ")
 }
 

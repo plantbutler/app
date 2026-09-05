@@ -22,7 +22,13 @@ private fun controller(
     float: Int? = null,
     pos: String? = null,
     command: InFlight? = null,
-) = ControllerHealth(name, lastSeen, nextS, float, pos, command)
+    latched: Latch? = null,
+    retired: Int = 0,
+    posOkSeen: Long? = null,
+) = ControllerHealth(
+    name, lastSeen, nextS, float, pos, command,
+    latched = latched, retired = retired, posOkSeen = posOkSeen,
+)
 
 private fun dose(
     state: String = "acked",
@@ -196,7 +202,9 @@ class GardenTest {
             Health(
                 ok = true,
                 controllers =
-                    listOf(controller(lastSeen = 990, float = 0, pos = "unknown")),
+                    // posOkSeen: a board that once knew its position, so the
+                    // pos line is a problem at all (see the dark board below).
+                    listOf(controller(lastSeen = 990, float = 0, pos = "unknown", posOkSeen = 100)),
                 alerts = listOf(RaisedAlert("float:0", 900)),
             )
         val found = problems(health, nowS = 1000)
@@ -276,6 +284,62 @@ class GardenTest {
         val stop = controller(lastSeen = 990, command = InFlight(17, "stop", "sent"))
         assertTrue(controllerLine(stop, 1000, 60).endsWith(" · cmd 17 stop sent"))
         assertFalse("cmd" in controllerLine(controller(lastSeen = 990), 1000, 60))
+    }
+
+    @Test
+    fun `the controller line says stopped and retired`() {
+        val stopped = controller(lastSeen = 990, float = 1, pos = "ok", latched = Latch(900, "contra"))
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · STOPPED",
+            controllerLine(stopped, 1000, 60),
+        )
+        val retired = controller(lastSeen = 990, retired = 1)
+        assertTrue(controllerLine(retired, 1000, 60).endsWith(" · retired"))
+    }
+
+    @Test
+    fun `the latch line says why, since when, and what to do`() {
+        val c = controller(lastSeen = 990, latched = Latch(since = 400, reason = "contra"))
+        assertEquals(
+            "board 0 stopped watering 10min ago: the float said full and the meter saw nothing. " +
+                "Check the tank, type clear contra on the board, then resume.",
+            latchLine(c, 1000),
+        )
+        assertEquals("it reset with the pump running", latchReason("resetmid"))
+        assertEquals("heap", latchReason("heap"))
+    }
+
+    @Test
+    fun `a stopped board is a problem until the backend's own page stands`() {
+        val stopped = controller(lastSeen = 990, float = 1, pos = "ok", latched = Latch(400, "contra"))
+        assertEquals(
+            listOf("board 0 stopped watering: the float said full and the meter saw nothing"),
+            problems(Health(ok = true, controllers = listOf(stopped)), nowS = 1000),
+        )
+        val paged =
+            Health(
+                ok = true,
+                controllers = listOf(stopped),
+                alerts = listOf(RaisedAlert("latch:0", raisedTs = 500)),
+            )
+        assertEquals(listOf("board 0 stopped watering (8min ago)"), problems(paged, nowS = 1000))
+        assertEquals(
+            "the float on board 0 never moved across the refill (8min ago)",
+            describeAlert("stale:0", nowS = 1000, raisedTs = 500),
+        )
+    }
+
+    @Test
+    fun `a board that never knew its position is not a problem, and a retired one is never silent`() {
+        val dark = controller(lastSeen = 990, float = 1, pos = "unknown", posOkSeen = null)
+        assertEquals(emptyList(), problems(Health(ok = true, controllers = listOf(dark)), nowS = 1000))
+        val lost = controller(lastSeen = 990, float = 1, pos = "unknown", posOkSeen = 100)
+        assertEquals(
+            listOf("board 0 lost its manifold position"),
+            problems(Health(ok = true, controllers = listOf(lost)), nowS = 1000),
+        )
+        val retired = controller(lastSeen = 10, retired = 1)
+        assertEquals(emptyList(), problems(Health(ok = true, controllers = listOf(retired)), nowS = 100000))
     }
 
     @Test
