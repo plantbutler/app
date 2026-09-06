@@ -253,10 +253,17 @@ data class ControllerHealth(
     /** How many of those runs it has. Null when the backend sent no such
      * key (a 0.18.0 one): no tank to speak of, rather than "learning 0/2". */
     @SerialName("tank_samples") val tankSamples: Int? = null,
-    /** Acked water since the latest refill; 0 without one. */
+    /** Acked water since the counter's origin, the later of the latest
+     * refill tap that saw the float and the float's latest rise (empty,
+     * then full again, with nobody tapping: the tank was refilled untapped
+     * and the float demonstrably moved, so the counter restarts there
+     * instead of calling it stuck); 0 without one. `lastRefill` is the tap
+     * alone, so this can count from a moment later than it. */
     @SerialName("pumped_ml") val pumpedMl: Int = 0,
-    /** 1 while more than the tank holds has been pumped since the refill
-     * and the float still says full: presumed stuck, the rules are dry. */
+    /** 1 while more than the tank holds has been pumped since that origin
+     * and the float still says full (presumed stuck, the rules are dry), or
+     * while the backend's over page stands — only a tap clears it, not the
+     * float dropping to empty. 0 for a retired board. */
     val over: Int = 0,
 )
 

@@ -99,6 +99,24 @@ class BackendTest {
     }
 
     @Test
+    fun `the counter and over count from the origin, which need not be a refill`() {
+        // The float rose (empty, then full) with nobody tapping: the backend
+        // restarts the counter at the rise, and last_refill still names the old
+        // tap or nothing. The app shows what it is sent and derives neither
+        // field from last_refill.
+        val (rise) =
+            parseHealth(
+                """{"ok": true, "controllers": [
+                     {"controller": 0, "last_seen": 5, "float": 1,
+                      "tank_ml": 4000, "tank_samples": 2, "pumped_ml": 4500, "over": 1}
+                   ]}""",
+            ).controllers
+        assertNull(rise.lastRefill)
+        assertEquals(4500, rise.pumpedMl)
+        assertEquals(1, rise.over)
+    }
+
+    @Test
     fun `an empty garden parses to an empty list`() {
         assertEquals(emptyList(), parsePots("""{"pots": []}"""))
     }

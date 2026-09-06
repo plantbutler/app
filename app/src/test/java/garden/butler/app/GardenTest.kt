@@ -3,6 +3,7 @@ package garden.butler.app
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -23,6 +24,7 @@ private fun controller(
     pos: String? = null,
     command: InFlight? = null,
     latched: Latch? = null,
+    lastRefill: Long? = null,
     retired: Int = 0,
     posOkSeen: Long? = null,
     tankMl: Int? = null,
@@ -31,7 +33,7 @@ private fun controller(
     over: Int = 0,
 ) = ControllerHealth(
     name, lastSeen, nextS, float, pos, command,
-    latched = latched, retired = retired, posOkSeen = posOkSeen,
+    latched = latched, lastRefill = lastRefill, retired = retired, posOkSeen = posOkSeen,
     tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over,
 )
 
@@ -521,6 +523,30 @@ class GardenTest {
         assertNull(overLine(over.copy(retired = 1)))
         // Nothing about the tank from a backend that sends no tank_samples, over or not.
         assertNull(overLine(over.copy(tankSamples = null)))
+    }
+
+    @Test
+    fun `the counter and OVER stand without a refill, since the origin can be the float's rise`() {
+        // A tank run down and refilled by someone who forgot to tap: the
+        // backend restarts the counter at the float's rise, and last_refill
+        // still says the old tap or nothing. The app shows the counter it is
+        // sent and gates nothing on the tap, so a row with and without one
+        // reads the same.
+        val rise =
+            controller(
+                lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2,
+                pumpedMl = 4500, over = 1, lastRefill = null,
+            )
+        val tapped = rise.copy(lastRefill = 900)
+        val line = controllerLine(rise, 1000, 60)
+        assertTrue(line.endsWith(" · tank ≈4.0 L, 4.5 L pumped · OVER"))
+        assertEquals(line, controllerLine(tapped, 1000, 60))
+        assertNotNull(overLine(rise))
+        assertEquals(overLine(tapped), overLine(rise))
+        assertEquals(
+            listOf("board 0 pumped more than its tank holds, float still says full"),
+            problems(Health(ok = true, controllers = listOf(rise)), nowS = 1000),
+        )
     }
 
     @Test
