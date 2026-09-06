@@ -250,7 +250,9 @@ data class ControllerHealth(
      * runs from a refill to the float going empty. Null while the butler
      * has fewer than two of those. */
     @SerialName("tank_ml") val tankMl: Int? = null,
-    @SerialName("tank_samples") val tankSamples: Int = 0,
+    /** How many of those runs it has. Null when the backend sent no such
+     * key (a 0.18.0 one): no tank to speak of, rather than "learning 0/2". */
+    @SerialName("tank_samples") val tankSamples: Int? = null,
     /** Acked water since the latest refill; 0 without one. */
     @SerialName("pumped_ml") val pumpedMl: Int = 0,
     /** 1 while more than the tank holds has been pumped since the refill

@@ -87,7 +87,8 @@ class BackendTest {
         assertEquals(0, plain.retired)
         assertNull(plain.posOkSeen)
         assertNull(plain.tankMl)
-        assertEquals(0, plain.tankSamples)
+        // Absent is null, not 0: a 0.18.0 backend has no tank to be learning.
+        assertNull(plain.tankSamples)
         assertEquals(0, plain.pumpedMl)
         assertEquals(0, plain.over)
         // A tank still being learnt is an explicit null, not an absence.

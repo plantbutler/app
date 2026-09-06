@@ -26,7 +26,7 @@ private fun controller(
     retired: Int = 0,
     posOkSeen: Long? = null,
     tankMl: Int? = null,
-    tankSamples: Int = 0,
+    tankSamples: Int? = null,
     pumpedMl: Int = 0,
     over: Int = 0,
 ) = ControllerHealth(
@@ -56,6 +56,10 @@ private val complete =
         targetLowPct = 30,
         doseMl = 100,
     )
+
+private const val TANK_HINT =
+    "Let the tank run empty twice without topping up, and tap refilled when you fill it " +
+        "to the top, so the butler learns its size."
 
 class GardenTest {
     @Test
@@ -272,21 +276,21 @@ class GardenTest {
     }
 
     @Test
-    fun `the controller line reads seen, interval, float, pos and tank`() {
+    fun `the controller line reads seen, interval, float and pos`() {
         assertEquals(
-            "board 0 · seen 40s ago · every 60s · float ok · pos ok · tank learning 0/2",
+            "board 0 · seen 40s ago · every 60s · float ok · pos ok",
             controllerLine(controller(lastSeen = 960, float = 1, pos = "ok"), 1000, 60),
         )
         assertEquals(
-            "board 0 · never reported · every 5s (override) · float EMPTY · pos unknown · tank learning 0/2",
+            "board 0 · never reported · every 5s (override) · float EMPTY · pos unknown",
             controllerLine(controller(nextS = 5, float = 0, pos = "unknown"), 1000, 60),
         )
         assertEquals(
-            "board 0 · seen 10s ago · every 30s · float ? · pos ? · tank learning 0/2",
+            "board 0 · seen 10s ago · every 30s · float ? · pos ?",
             controllerLine(controller(lastSeen = 990), 1000, 30),
         )
         assertEquals(
-            "board 0 · seen 10s ago · every 60s · float ok · pos 3 · tank learning 0/2",
+            "board 0 · seen 10s ago · every 60s · float ok · pos 3",
             controllerLine(controller(lastSeen = 990, float = 1, pos = "3"), 1000, 60),
         )
     }
@@ -304,8 +308,33 @@ class GardenTest {
                 .endsWith(" · tank ≈850 ml, 0 ml pumped"),
         )
         assertTrue(
+            controllerLine(controller(lastSeen = 990, tankSamples = 0), 1000, 60)
+                .endsWith(" · tank learning 0/2"),
+        )
+        assertTrue(
             controllerLine(controller(lastSeen = 990, tankSamples = 1), 1000, 60)
                 .endsWith(" · tank learning 1/2"),
+        )
+    }
+
+    @Test
+    fun `no tank part without tank_samples, nor on a retired row`() {
+        // A 0.18.0 backend sends no tank_samples: "learning 0/2" would nag for a feature it lacks.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok",
+            controllerLine(controller(lastSeen = 990, float = 1, pos = "ok", tankSamples = null), 1000, 60),
+        )
+        // Retired is the last word and a quiet one: no tank, learnt or not.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ? · pos ? · retired",
+            controllerLine(controller(lastSeen = 990, tankSamples = 1, retired = 1), 1000, 60),
+        )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ? · pos ? · retired",
+            controllerLine(
+                controller(lastSeen = 990, tankMl = 4000, tankSamples = 2, pumpedMl = 100, retired = 1),
+                1000, 60,
+            ),
         )
     }
 
@@ -323,7 +352,7 @@ class GardenTest {
     }
 
     @Test
-    fun `OVER sits after STOPPED's slot and before retired`() {
+    fun `OVER sits after STOPPED's slot, and neither a retired row nor one without tank_samples shows it`() {
         val over =
             controller(
                 lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500,
@@ -338,8 +367,15 @@ class GardenTest {
             controllerLine(over.copy(command = null, latched = null), 1000, 60)
                 .endsWith(" pumped · OVER"),
         )
-        assertTrue(controllerLine(over.copy(retired = 1), 1000, 60).endsWith(" · OVER · retired"))
         assertFalse("OVER" in controllerLine(over.copy(over = 0), 1000, 60))
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · cmd 17 sent · STOPPED · retired",
+            controllerLine(over.copy(retired = 1), 1000, 60),
+        )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · cmd 17 sent · STOPPED",
+            controllerLine(over.copy(tankSamples = null), 1000, 60),
+        )
     }
 
     @Test
@@ -355,7 +391,7 @@ class GardenTest {
     fun `the controller line says stopped and retired`() {
         val stopped = controller(lastSeen = 990, float = 1, pos = "ok", latched = Latch(900, "contra"))
         assertEquals(
-            "board 0 · seen 10s ago · every 60s · float ok · pos ok · tank learning 0/2 · STOPPED",
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · STOPPED",
             controllerLine(stopped, 1000, 60),
         )
         val retired = controller(lastSeen = 990, retired = 1)
@@ -420,6 +456,27 @@ class GardenTest {
     }
 
     @Test
+    fun `the over dedup is per board, so one board's page does not hide another's`() {
+        val over =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        val health =
+            Health(
+                ok = true,
+                controllers = listOf(over, over.copy(controller = 1)),
+                alerts = listOf(RaisedAlert("over:0", raisedTs = 500)),
+            )
+        // Board 0 reads from its page; board 1 is over but not paged yet (the
+        // ticker debounces), so its own line stands.
+        assertEquals(
+            listOf(
+                "board 0 pumped more than its tank holds (8min ago)",
+                "board 1 pumped more than its tank holds, float still says full",
+            ),
+            problems(health, nowS = 1000),
+        )
+    }
+
+    @Test
     fun `the tank alerts become readable lines`() {
         assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
         assertEquals(
@@ -436,24 +493,34 @@ class GardenTest {
 
     @Test
     fun `the learning hint stands under a board until two samples, never under a retired one`() {
-        val hint =
-            "Let the tank run empty twice without topping up, and tap refilled when you fill it " +
-                "to the top, so the butler learns its size."
-        assertEquals(hint, tankHint(controller(lastSeen = 990)))
-        assertEquals(hint, tankHint(controller(lastSeen = 990, tankSamples = 1)))
+        assertEquals(TANK_HINT, tankHint(controller(lastSeen = 990, tankSamples = 0)))
+        assertEquals(TANK_HINT, tankHint(controller(lastSeen = 990, tankSamples = 1)))
         assertNull(tankHint(controller(lastSeen = 990, tankSamples = 2, tankMl = 4000)))
-        assertNull(tankHint(controller(lastSeen = 990, retired = 1)))
+        assertNull(tankHint(controller(lastSeen = 990, tankSamples = 1, retired = 1)))
+    }
+
+    @Test
+    fun `the hint reads the sample count, not the size, and a backend without one gets none`() {
+        // The count is the gate: a size beside one sample still hints, two
+        // samples without a size do not.
+        assertEquals(TANK_HINT, tankHint(controller(lastSeen = 990, tankSamples = 1, tankMl = 4000)))
+        assertNull(tankHint(controller(lastSeen = 990, tankSamples = 2, tankMl = null)))
+        // A 0.18.0 backend sends no tank_samples: nothing to learn, nothing to nag about.
+        assertNull(tankHint(controller(lastSeen = 990)))
     }
 
     @Test
     fun `the over line names the board and what to do, and a retired row has none`() {
+        val over = controller(lastSeen = 990, tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
         assertEquals(
             "board 0 pumped more than its tank holds and the float still says full: " +
                 "check the float, refill, then tap refilled.",
-            overLine(controller(lastSeen = 990, over = 1)),
+            overLine(over),
         )
-        assertNull(overLine(controller(lastSeen = 990)))
-        assertNull(overLine(controller(lastSeen = 990, over = 1, retired = 1)))
+        assertNull(overLine(over.copy(over = 0)))
+        assertNull(overLine(over.copy(retired = 1)))
+        // Nothing about the tank from a backend that sends no tank_samples, over or not.
+        assertNull(overLine(over.copy(tankSamples = null)))
     }
 
     @Test
@@ -604,6 +671,25 @@ class GardenTest {
         assertEquals(
             listOf("a channel", "the board reporting float=1 and pos=ok (now float ?, pos ?)"),
             learningGaps(complete.copy(channel = null), null),
+        )
+    }
+
+    @Test
+    fun `learning also needs the board not to be over, which the rules skip before anything else`() {
+        val over =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        assertEquals(
+            listOf("the board not having pumped more than its tank holds"),
+            learningGaps(complete, over),
+        )
+        assertEquals(emptyList(), learningGaps(complete, over.copy(over = 0)))
+        // An over page stands until the tap whatever the float says meanwhile: both gaps show.
+        assertEquals(
+            listOf(
+                "the board reporting float=1 and pos=ok (now float 0, pos ok)",
+                "the board not having pumped more than its tank holds",
+            ),
+            learningGaps(complete, over.copy(float = 0)),
         )
     }
 

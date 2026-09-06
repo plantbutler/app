@@ -215,7 +215,8 @@ fun mlText(ml: Int): String {
  * learning 1/2" until it is measured), plus the command in flight when
  * there is one, then STOPPED while the butler has stopped watering it,
  * OVER while it has pumped more than the tank holds with the float still
- * saying full, and retired when a person has retired it. The number is
+ * saying full, and retired when a person has retired it. The tank part and
+ * OVER only when the row speaks of its tank (`tankSamplesShown`). The number is
  * spelt "board 0" wherever a person reads it: bare, an integer controller
  * reads like a stray digit. */
 fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
@@ -228,37 +229,46 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
             else -> "float ok"
         }
     val pos = c.pos?.let { "pos $it" } ?: "pos ?"
-    val tank =
-        c.tankMl?.let { "tank ≈${mlText(it)}, ${mlText(c.pumpedMl)} pumped" }
-            ?: "tank learning ${c.tankSamples}/$TANK_SAMPLES_TO_ARM"
-    val parts = mutableListOf(boardName(c.controller), seen, every, float, pos, tank)
+    val parts = mutableListOf(boardName(c.controller), seen, every, float, pos)
+    tankSamplesShown(c)?.let { samples ->
+        parts +=
+            c.tankMl?.let { "tank ≈${mlText(it)}, ${mlText(c.pumpedMl)} pumped" }
+                ?: "tank learning $samples/$TANK_SAMPLES_TO_ARM"
+    }
     c.command?.let { cmd ->
         val kind = if (cmd.kind == "water") "" else " ${cmd.kind}"
         parts += "cmd ${cmd.id}$kind ${cmd.state}"
     }
     if (c.latched != null) parts += "STOPPED"
-    if (c.over == 1) parts += "OVER"
+    if (c.over == 1 && tankSamplesShown(c) != null) parts += "OVER"
     if (c.retired == 1) parts += "retired"
     return parts.joinToString(" · ")
 }
 
+/** The sample count a row speaks of, or null when the row says nothing about
+ * its tank: no tank part on the line, no OVER, no hint, no over line. Null
+ * without `tank_samples` — a 0.18.0 backend sends none, and "learning 0/2"
+ * would nag for a feature it lacks — and on a retired row: retired is the
+ * last word and a quiet one. */
+fun tankSamplesShown(c: ControllerHealth): Int? = c.tankSamples?.takeIf { c.retired != 1 }
+
 /** The line under a board's row while its tank is still being measured, or
  * null. This is where the refilled chip's meaning lives — the tap means
  * "full to the top", and the size is what the meter counts between that
- * and the float going empty — so the chip itself keeps its one word. A
- * retired board learns nothing and gets no hint. */
+ * and the float going empty — so the chip itself keeps its one word. Gated
+ * on the sample count, not on the size being null: the backend makes those
+ * coincide today, and that is its rule to change. Nothing under a row that
+ * says nothing about its tank (`tankSamplesShown`). */
 fun tankHint(c: ControllerHealth): String? =
-    if (c.retired != 1 && c.tankSamples < TANK_SAMPLES_TO_ARM) {
+    tankSamplesShown(c)?.takeIf { it < TANK_SAMPLES_TO_ARM }?.let {
         "Let the tank run empty twice without topping up, and tap refilled when you fill it " +
             "to the top, so the butler learns its size."
-    } else {
-        null
     }
 
 /** The line under a board the butler presumes stuck at full, or null: what
  * happened and the three things to do, the last of which is the clear. */
 fun overLine(c: ControllerHealth): String? =
-    if (c.retired != 1 && c.over == 1) {
+    if (c.over == 1 && tankSamplesShown(c) != null) {
         "${boardName(c.controller)} pumped more than its tank holds and the float still says " +
             "full: check the float, refill, then tap refilled."
     } else {
@@ -319,7 +329,8 @@ fun rowNote(pot: Pot, nowS: Long): String? {
 /** What the backend's rules need before learning or auto can do anything,
  * so the mode flip explains itself instead of silently doing nothing. The
  * rules also gate on the board's float and pos, which the firmware does
- * not send yet: that gap names itself rather than being read as "fine". */
+ * not send yet, and skip a board that is over: those gaps name themselves
+ * rather than being read as "fine". */
 fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
     val gaps = mutableListOf<String>()
     if (pot.controller == null) gaps += "a controller"
@@ -333,6 +344,7 @@ fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
             "the board reporting float=1 and pos=ok (now float ${controller?.float ?: "?"}, " +
                 "pos ${controller?.pos ?: "?"})"
     }
+    if (controller?.over == 1) gaps += "the board not having pumped more than its tank holds"
     return gaps
 }
 
