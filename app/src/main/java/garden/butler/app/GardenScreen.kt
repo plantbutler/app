@@ -224,10 +224,13 @@ private fun ProblemStrip(problems: List<String>) {
     }
 }
 
-/** One line per controller, with a "refilled" chip — the human event the
- * tank is measured from and the stuck-float rule counts from; a leftover
- * interval override (a wizard that could not restore it) gets its reset
- * here. A retired board offers neither chip. Under the line, while the
+/** One line per controller, with a "refilled" chip — the tap, the human
+ * event the tank is measured from and the only thing that clears OVER.
+ * The stuck-float rule counts from the later of that tap and the float's
+ * own latest rise, so its counter and OVER can stand on a board nobody
+ * ever tapped. A leftover interval override (a wizard that could not
+ * restore it) gets its reset here. A retired board offers neither chip.
+ * Under the line, while the
  * tank is still being learnt, the one sentence that says what the tap
  * means; a board presumed stuck at full gets what to do about it in the
  * error colour. A board the butler has stopped watering gets the reason

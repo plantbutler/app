@@ -214,9 +214,11 @@ fun mlText(ml: Int): String {
  * every 60s · float ok · pos ok · tank ≈4.2 L, 1.1 L pumped" (or "tank
  * learning 1/2" until it is measured), plus the command in flight when
  * there is one, then STOPPED while the butler has stopped watering it,
- * OVER while it has pumped more than the tank holds with the float still
- * saying full, and retired when a person has retired it. The tank part and
- * OVER only when the row speaks of its tank (`tankSamplesShown`). The number is
+ * OVER while the backend says so (it pumped more than the tank holds with
+ * the float still saying full, or that page stands: only a tap clears it,
+ * so OVER sits beside "float EMPTY" too), and retired when a person has
+ * retired it. The tank part and OVER only when the row speaks of its tank
+ * (`tankSamplesShown`). The number is
  * spelt "board 0" wherever a person reads it: bare, an integer controller
  * reads like a stray digit. */
 fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
@@ -266,7 +268,9 @@ fun tankHint(c: ControllerHealth): String? =
     }
 
 /** The line under a board the butler presumes stuck at full, or null: what
- * happened and the three things to do, the last of which is the clear. */
+ * happened and the three things to do, the last of which is the clear. Not
+ * gated on the float word: a 0 is a contra, a flap or an omitted `float=`
+ * as often as an empty tank, and the tap is the only clear. */
 fun overLine(c: ControllerHealth): String? =
     if (c.over == 1 && tankSamplesShown(c) != null) {
         "${boardName(c.controller)} pumped more than its tank holds and the float still says " +

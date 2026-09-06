@@ -547,6 +547,44 @@ class GardenTest {
             listOf("board 0 pumped more than its tank holds, float still says full"),
             problems(Health(ok = true, controllers = listOf(rise)), nowS = 1000),
         )
+        // The over line asks for a tap, so the chip is offered on a row that
+        // never had one.
+        assertTrue(offersChips(rise))
+    }
+
+    @Test
+    fun `OVER stands while the float reads empty or says nothing, since only the tap clears it`() {
+        // The backend's over page is cleared by a tap alone: the float word
+        // dropping to 0 is a contra, a flap or an omitted float= as often as
+        // an empty tank. So the line, the over line and the problem gate on
+        // nothing but `over`, and "float EMPTY" sits beside OVER.
+        val full =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        val empty = full.copy(float = 0)
+        val mute = full.copy(float = null)
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float EMPTY · pos ok · tank ≈4.0 L, 4.5 L pumped · OVER",
+            controllerLine(empty, 1000, 60),
+        )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ? · pos ok · tank ≈4.0 L, 4.5 L pumped · OVER",
+            controllerLine(mute, 1000, 60),
+        )
+        assertNotNull(overLine(empty))
+        assertEquals(overLine(full), overLine(empty))
+        assertEquals(overLine(full), overLine(mute))
+        // Both stand at once: the empty reservoir and the presumed-stuck float.
+        assertEquals(
+            listOf(
+                "reservoir empty on board 0",
+                "board 0 pumped more than its tank holds, float still says full",
+            ),
+            problems(Health(ok = true, controllers = listOf(empty)), nowS = 1000),
+        )
+        assertEquals(
+            listOf("board 0 pumped more than its tank holds, float still says full"),
+            problems(Health(ok = true, controllers = listOf(mute)), nowS = 1000),
+        )
     }
 
     @Test
