@@ -225,9 +225,12 @@ private fun ProblemStrip(problems: List<String>) {
 }
 
 /** One line per controller, with a "refilled" chip — the human event the
- * stuck-float rule measures against; a leftover interval override (a wizard
- * that could not restore it) gets its reset here. A retired board offers
- * neither chip. A board the butler has stopped watering gets the reason
+ * tank is measured from and the stuck-float rule counts from; a leftover
+ * interval override (a wizard that could not restore it) gets its reset
+ * here. A retired board offers neither chip. Under the line, while the
+ * tank is still being learnt, the one sentence that says what the tap
+ * means; a board presumed stuck at full gets what to do about it in the
+ * error colour. A board the butler has stopped watering gets the reason
  * under its line and a Resume behind one question, since two of the three
  * things to do happen at the tank and the board, not in this app. */
 @Composable
@@ -262,6 +265,14 @@ private fun ControllersCard(
                             )
                         }
                     }
+                }
+                tankHint(c)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                overLine(c)?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 c.latched?.let {
                     var asking by remember(c.controller) { mutableStateOf(false) }

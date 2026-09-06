@@ -63,7 +63,8 @@ is on screen. Nothing is queued to send later.
 - `Backend.kt` — the wire models (`Pot` with its `pot-xxxxxx` id, its nickname, `species` and
   every other pots column, `Proposal`, `LastDose`,
   `Health` with `next_default` and per-controller `command`, `Latch` and the tank fields on
-  `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`)),
+  `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`, and
+  since 2026-09-06 `tank_ml` (null while learning), `tank_samples`, `pumped_ml`, `over`)),
   `Json { ignoreUnknownKeys }`, and the one class that touches the network: GETs, `post()` for
   `/pot`, `/approve`, `/verdict`, `/interval` with the `X-Token` header, and `refill()` and
   `resume()` (`POST /refill` and `POST /resume`, body `c=<n>`, both handing back the raw
@@ -73,8 +74,13 @@ is on screen. Nothing is queued to send later.
   again: …"); the app shows it as is. The backend's merged-row checks are the validation.
 - `Garden.kt` — pure lines and splits: `splitGarden` (pots / env / disabled + the health it
   came with), `problems` (raised alerts + app-side silence with `next_default`, a stopped
-  board, and the pos line gated on `pos_ok_seen`), the latch and stale alert descriptions, the
-  controller line with the STOPPED and retired marks on it, `latchLine`/`latchReason` (the
+  board, an over board, and the pos line gated on `pos_ok_seen`), the latch, over, stale and
+  tank alert descriptions, the controller line with the tank part (`tank ≈4.2 L, 1.1 L pumped`
+  through `mlText`, or `tank learning 1/2` under two samples) and the STOPPED, OVER and retired
+  marks on it, `tankHint` (the one sentence that says what the refilled chip means — full to
+  the top — shown while the tank is being learnt, never under a retired row) and `overLine`
+  (what to do about a float presumed stuck at full; `cannotWater` is not gated on it, mirroring
+  the backend), `latchLine`/`latchReason` (the
   board's reason in a person's words) and `LATCH_STEPS` (what to do about a stopped board —
   check the tank, type clear contra on the board, then resume — said once, because the water
   button's refusal in `Water.kt` repeats it and used to drop the `clear contra` step, without

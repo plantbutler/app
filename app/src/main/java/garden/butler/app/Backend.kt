@@ -246,6 +246,16 @@ data class ControllerHealth(
     val retired: Int = 0,
     /** When the board last said pos=ok; null for one that never has. */
     @SerialName("pos_ok_seen") val posOkSeen: Long? = null,
+    /** The tank's size as the meter measured it: the median of the last
+     * runs from a refill to the float going empty. Null while the butler
+     * has fewer than two of those. */
+    @SerialName("tank_ml") val tankMl: Int? = null,
+    @SerialName("tank_samples") val tankSamples: Int = 0,
+    /** Acked water since the latest refill; 0 without one. */
+    @SerialName("pumped_ml") val pumpedMl: Int = 0,
+    /** 1 while more than the tank holds has been pumped since the refill
+     * and the float still says full: presumed stuck, the rules are dry. */
+    val over: Int = 0,
 )
 
 @Serializable

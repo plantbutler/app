@@ -64,21 +64,37 @@ class BackendTest {
             parseHealth(
                 """{"ok": true, "controllers": [
                      {"controller": 0, "last_seen": 5, "latched": {"since": 4, "reason": "contra"},
-                      "last_refill": 3, "err": "contra", "err_ts": 4, "retired": 0, "pos_ok_seen": 2},
-                     {"controller": 1, "last_seen": 5}
+                      "last_refill": 3, "err": "contra", "err_ts": 4, "retired": 0, "pos_ok_seen": 2,
+                      "tank_ml": 4180, "tank_samples": 3, "pumped_ml": 1100, "over": 1},
+                     {"controller": 1, "last_seen": 5},
+                     {"controller": 2, "last_seen": 5, "tank_ml": null, "tank_samples": 1,
+                      "pumped_ml": 250, "over": 0}
                    ]}""",
             )
-        val (latched, plain) = health.controllers
+        val (latched, plain, learning) = health.controllers
         assertEquals(Latch(since = 4, reason = "contra"), latched.latched)
         assertEquals(3L, latched.lastRefill)
         assertEquals("contra" to 4L, latched.err to latched.errTs)
         assertEquals(0, latched.retired)
         assertEquals(2L, latched.posOkSeen)
+        assertEquals(4180, latched.tankMl)
+        assertEquals(3, latched.tankSamples)
+        assertEquals(1100, latched.pumpedMl)
+        assertEquals(1, latched.over)
         assertNull(plain.latched)
         assertNull(plain.lastRefill)
         assertNull(plain.err)
         assertEquals(0, plain.retired)
         assertNull(plain.posOkSeen)
+        assertNull(plain.tankMl)
+        assertEquals(0, plain.tankSamples)
+        assertEquals(0, plain.pumpedMl)
+        assertEquals(0, plain.over)
+        // A tank still being learnt is an explicit null, not an absence.
+        assertNull(learning.tankMl)
+        assertEquals(1, learning.tankSamples)
+        assertEquals(250, learning.pumpedMl)
+        assertEquals(0, learning.over)
     }
 
     @Test

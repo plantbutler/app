@@ -92,6 +92,9 @@ fun problems(health: Health, nowS: Long): List<String> {
                 found += "${boardName(c.controller)} stopped watering: ${latchReason(latch.reason)}"
             }
         }
+        if (c.over == 1 && "over:${c.controller}" !in raised) {
+            found += "${boardName(c.controller)} pumped more than its tank holds, float still says full"
+        }
     }
     return found
 }
@@ -135,7 +138,10 @@ fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
         "float" -> "reservoir empty on ${board(1)}$since"
         "pos" -> "${board(1)} lost its manifold position$since"
         "latch" -> "${board(1)} stopped watering$since"
-        "stale" -> "the float on ${board(1)} never moved across the refill$since"
+        "over" -> "${board(1)} pumped more than its tank holds$since"
+        "stale" -> "the float on ${board(1)} still says empty after the refill$since"
+        // A one-shot the backend keeps out of /health; rendered all the same.
+        "tank" -> "${board(1)} measured its tank$since"
         "sensor" ->
             "sensor ch${parts.getOrElse(2) { "?" }} on ${board(1)} stopped reporting$since"
         "fields" ->
@@ -190,11 +196,28 @@ fun envEntry(pot: Pot): Pair<String, String> {
     return pot.name.removePrefix(ENV_PREFIX) to value
 }
 
+/** How many runs from a refill to empty the butler wants before it trusts
+ * a tank size: the backend's TANK_SAMPLES_TO_ARM. */
+const val TANK_SAMPLES_TO_ARM = 2
+
+/** A volume as a person reads it: millilitres below a litre, litres to one
+ * decimal from there. One helper, so the tank and what left it are never
+ * spelt two ways on the same line. Integer arithmetic on purpose: a locale
+ * with a decimal comma must not make "4,2 L" out of a wire number. */
+fun mlText(ml: Int): String {
+    if (ml < 1000) return "$ml ml"
+    val tenths = (ml + 50) / 100
+    return "${tenths / 10}.${tenths % 10} L"
+}
+
 /** One line per controller on the health list: "board 0 · seen 40s ago ·
- * every 60s · float ok · pos ok", plus the command in flight when there is
- * one, then STOPPED while the butler has stopped watering it and retired
- * when a person has retired it. The number is spelt "board 0" wherever a
- * person reads it: bare, an integer controller reads like a stray digit. */
+ * every 60s · float ok · pos ok · tank ≈4.2 L, 1.1 L pumped" (or "tank
+ * learning 1/2" until it is measured), plus the command in flight when
+ * there is one, then STOPPED while the butler has stopped watering it,
+ * OVER while it has pumped more than the tank holds with the float still
+ * saying full, and retired when a person has retired it. The number is
+ * spelt "board 0" wherever a person reads it: bare, an integer controller
+ * reads like a stray digit. */
 fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
     val seen = if (c.lastSeen == 0L) "never reported" else "seen ${agoText(c.lastSeen, nowS)}"
     val every = c.nextS?.let { "every ${it}s (override)" } ?: "every ${defaultNextS}s"
@@ -205,15 +228,42 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
             else -> "float ok"
         }
     val pos = c.pos?.let { "pos $it" } ?: "pos ?"
-    val parts = mutableListOf(boardName(c.controller), seen, every, float, pos)
+    val tank =
+        c.tankMl?.let { "tank ≈${mlText(it)}, ${mlText(c.pumpedMl)} pumped" }
+            ?: "tank learning ${c.tankSamples}/$TANK_SAMPLES_TO_ARM"
+    val parts = mutableListOf(boardName(c.controller), seen, every, float, pos, tank)
     c.command?.let { cmd ->
         val kind = if (cmd.kind == "water") "" else " ${cmd.kind}"
         parts += "cmd ${cmd.id}$kind ${cmd.state}"
     }
     if (c.latched != null) parts += "STOPPED"
+    if (c.over == 1) parts += "OVER"
     if (c.retired == 1) parts += "retired"
     return parts.joinToString(" · ")
 }
+
+/** The line under a board's row while its tank is still being measured, or
+ * null. This is where the refilled chip's meaning lives — the tap means
+ * "full to the top", and the size is what the meter counts between that
+ * and the float going empty — so the chip itself keeps its one word. A
+ * retired board learns nothing and gets no hint. */
+fun tankHint(c: ControllerHealth): String? =
+    if (c.retired != 1 && c.tankSamples < TANK_SAMPLES_TO_ARM) {
+        "Let the tank run empty twice without topping up, and tap refilled when you fill it " +
+            "to the top, so the butler learns its size."
+    } else {
+        null
+    }
+
+/** The line under a board the butler presumes stuck at full, or null: what
+ * happened and the three things to do, the last of which is the clear. */
+fun overLine(c: ControllerHealth): String? =
+    if (c.retired != 1 && c.over == 1) {
+        "${boardName(c.controller)} pumped more than its tank holds and the float still says " +
+            "full: check the float, refill, then tap refilled."
+    } else {
+        null
+    }
 
 fun hasOverride(c: ControllerHealth): Boolean = c.nextS != null
 

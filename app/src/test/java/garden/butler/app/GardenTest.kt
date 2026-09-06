@@ -25,9 +25,14 @@ private fun controller(
     latched: Latch? = null,
     retired: Int = 0,
     posOkSeen: Long? = null,
+    tankMl: Int? = null,
+    tankSamples: Int = 0,
+    pumpedMl: Int = 0,
+    over: Int = 0,
 ) = ControllerHealth(
     name, lastSeen, nextS, float, pos, command,
     latched = latched, retired = retired, posOkSeen = posOkSeen,
+    tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over,
 )
 
 private fun dose(
@@ -267,23 +272,74 @@ class GardenTest {
     }
 
     @Test
-    fun `the controller line reads seen, interval, float and pos`() {
+    fun `the controller line reads seen, interval, float, pos and tank`() {
         assertEquals(
-            "board 0 · seen 40s ago · every 60s · float ok · pos ok",
+            "board 0 · seen 40s ago · every 60s · float ok · pos ok · tank learning 0/2",
             controllerLine(controller(lastSeen = 960, float = 1, pos = "ok"), 1000, 60),
         )
         assertEquals(
-            "board 0 · never reported · every 5s (override) · float EMPTY · pos unknown",
+            "board 0 · never reported · every 5s (override) · float EMPTY · pos unknown · tank learning 0/2",
             controllerLine(controller(nextS = 5, float = 0, pos = "unknown"), 1000, 60),
         )
         assertEquals(
-            "board 0 · seen 10s ago · every 30s · float ? · pos ?",
+            "board 0 · seen 10s ago · every 30s · float ? · pos ? · tank learning 0/2",
             controllerLine(controller(lastSeen = 990), 1000, 30),
         )
         assertEquals(
-            "board 0 · seen 10s ago · every 60s · float ok · pos 3",
+            "board 0 · seen 10s ago · every 60s · float ok · pos 3 · tank learning 0/2",
             controllerLine(controller(lastSeen = 990, float = 1, pos = "3"), 1000, 60),
         )
+    }
+
+    @Test
+    fun `the tank part says the size and the counter once known, and learning until then`() {
+        val known = controller(lastSeen = 960, float = 1, pos = "ok", tankMl = 4180, tankSamples = 3, pumpedMl = 1100)
+        assertEquals(
+            "board 0 · seen 40s ago · every 60s · float ok · pos ok · tank ≈4.2 L, 1.1 L pumped",
+            controllerLine(known, 1000, 60),
+        )
+        // Both volumes go through the same helper: a small tank reads in ml.
+        assertTrue(
+            controllerLine(known.copy(tankMl = 850, pumpedMl = 0), 1000, 60)
+                .endsWith(" · tank ≈850 ml, 0 ml pumped"),
+        )
+        assertTrue(
+            controllerLine(controller(lastSeen = 990, tankSamples = 1), 1000, 60)
+                .endsWith(" · tank learning 1/2"),
+        )
+    }
+
+    @Test
+    fun `volumes read in millilitres below a litre and in litres to one decimal from it`() {
+        assertEquals("0 ml", mlText(0))
+        assertEquals("850 ml", mlText(850))
+        assertEquals("999 ml", mlText(999))
+        assertEquals("1.0 L", mlText(1000))
+        assertEquals("4.2 L", mlText(4180))
+        // Half rounds up, and the decimal never goes missing on a round litre.
+        assertEquals("4.1 L", mlText(4149))
+        assertEquals("4.2 L", mlText(4150))
+        assertEquals("10.0 L", mlText(10_000))
+    }
+
+    @Test
+    fun `OVER sits after STOPPED's slot and before retired`() {
+        val over =
+            controller(
+                lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500,
+                over = 1, command = InFlight(17, "water", "sent"), latched = Latch(900, "contra"),
+            )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · tank ≈4.0 L, 4.5 L pumped" +
+                " · cmd 17 sent · STOPPED · OVER",
+            controllerLine(over, 1000, 60),
+        )
+        assertTrue(
+            controllerLine(over.copy(command = null, latched = null), 1000, 60)
+                .endsWith(" pumped · OVER"),
+        )
+        assertTrue(controllerLine(over.copy(retired = 1), 1000, 60).endsWith(" · OVER · retired"))
+        assertFalse("OVER" in controllerLine(over.copy(over = 0), 1000, 60))
     }
 
     @Test
@@ -299,7 +355,7 @@ class GardenTest {
     fun `the controller line says stopped and retired`() {
         val stopped = controller(lastSeen = 990, float = 1, pos = "ok", latched = Latch(900, "contra"))
         assertEquals(
-            "board 0 · seen 10s ago · every 60s · float ok · pos ok · STOPPED",
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · tank learning 0/2 · STOPPED",
             controllerLine(stopped, 1000, 60),
         )
         val retired = controller(lastSeen = 990, retired = 1)
@@ -333,9 +389,79 @@ class GardenTest {
             )
         assertEquals(listOf("board 0 stopped watering (8min ago)"), problems(paged, nowS = 1000))
         assertEquals(
-            "the float on board 0 never moved across the refill (8min ago)",
+            "the float on board 0 still says empty after the refill (8min ago)",
             describeAlert("stale:0", nowS = 1000, raisedTs = 500),
         )
+    }
+
+    @Test
+    fun `an over board is a problem until the backend's own page stands`() {
+        val over =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        assertEquals(
+            listOf("board 0 pumped more than its tank holds, float still says full"),
+            problems(Health(ok = true, controllers = listOf(over)), nowS = 1000),
+        )
+        val paged =
+            Health(
+                ok = true,
+                controllers = listOf(over),
+                alerts = listOf(RaisedAlert("over:0", raisedTs = 500)),
+            )
+        assertEquals(
+            listOf("board 0 pumped more than its tank holds (8min ago)"),
+            problems(paged, nowS = 1000),
+        )
+        // A retired board is quiet by choice, over or not.
+        assertEquals(
+            emptyList(),
+            problems(Health(ok = true, controllers = listOf(over.copy(retired = 1))), nowS = 1000),
+        )
+    }
+
+    @Test
+    fun `the tank alerts become readable lines`() {
+        assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
+        assertEquals(
+            "the float on board 0 still says empty after the refill",
+            describeAlert("stale:0"),
+        )
+        // Never raised in /health by design; rendered anyway rather than echoing the key.
+        assertEquals("board 0 measured its tank", describeAlert("tank:0:1788291874"))
+        assertEquals(
+            "board 0 measured its tank (50s ago)",
+            describeAlert("tank:0:1788291874", nowS = 1000, raisedTs = 950),
+        )
+    }
+
+    @Test
+    fun `the learning hint stands under a board until two samples, never under a retired one`() {
+        val hint =
+            "Let the tank run empty twice without topping up, and tap refilled when you fill it " +
+                "to the top, so the butler learns its size."
+        assertEquals(hint, tankHint(controller(lastSeen = 990)))
+        assertEquals(hint, tankHint(controller(lastSeen = 990, tankSamples = 1)))
+        assertNull(tankHint(controller(lastSeen = 990, tankSamples = 2, tankMl = 4000)))
+        assertNull(tankHint(controller(lastSeen = 990, retired = 1)))
+    }
+
+    @Test
+    fun `the over line names the board and what to do, and a retired row has none`() {
+        assertEquals(
+            "board 0 pumped more than its tank holds and the float still says full: " +
+                "check the float, refill, then tap refilled.",
+            overLine(controller(lastSeen = 990, over = 1)),
+        )
+        assertNull(overLine(controller(lastSeen = 990)))
+        assertNull(overLine(controller(lastSeen = 990, over = 1, retired = 1)))
+    }
+
+    @Test
+    fun `over does not gate the water button, mirroring the backend`() {
+        // A human is at the phone, the board's own float check still runs,
+        // and the no-flow abort is beneath both.
+        val pot = complete.copy(id = "p")
+        assertNull(cannotWater(pot, controller(lastSeen = 990, over = 1), 1000, 60, emptySet()))
     }
 
     @Test
