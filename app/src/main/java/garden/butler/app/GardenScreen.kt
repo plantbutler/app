@@ -226,10 +226,10 @@ private fun ProblemStrip(problems: List<String>) {
 
 /** One line per controller, with a "refilled" chip — the human event the
  * stuck-float rule measures against; a leftover interval override (a wizard
- * that could not restore it) gets its reset here. A board the butler has
- * stopped watering gets the reason under its line and a Resume behind one
- * question, since two of the three things to do happen at the tank and the
- * board, not in this app. */
+ * that could not restore it) gets its reset here. A retired board offers
+ * neither chip. A board the butler has stopped watering gets the reason
+ * under its line and a Resume behind one question, since two of the three
+ * things to do happen at the tank and the board, not in this app. */
 @Composable
 private fun ControllersCard(
     health: Health,
@@ -248,17 +248,19 @@ private fun ControllersCard(
                         Modifier.weight(1f),
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    AssistChip(
-                        onClick = { refill(c.controller) },
-                        enabled = live,
-                        label = { Text("refilled") },
-                    )
-                    if (hasOverride(c)) {
+                    if (offersChips(c)) {
                         AssistChip(
-                            onClick = { reset(c.controller) },
+                            onClick = { refill(c.controller) },
                             enabled = live,
-                            label = { Text("reset") },
+                            label = { Text("refilled") },
                         )
+                        if (hasOverride(c)) {
+                            AssistChip(
+                                onClick = { reset(c.controller) },
+                                enabled = live,
+                                label = { Text("reset") },
+                            )
+                        }
                     }
                 }
                 c.latched?.let {

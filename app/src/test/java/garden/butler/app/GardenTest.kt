@@ -358,6 +358,14 @@ class GardenTest {
     }
 
     @Test
+    fun `a retired board offers no refilled or reset chip, an active one does`() {
+        assertFalse(offersChips(controller(retired = 1)))
+        assertFalse(offersChips(controller(retired = 1, nextS = 5)))
+        assertTrue(offersChips(controller()))
+        assertTrue(offersChips(controller(nextS = 5, latched = Latch(since = 1, reason = "contra"))))
+    }
+
+    @Test
     fun `the proposal line says what, how capped and how old`() {
         assertEquals(
             "proposal: 100 ml, cap 10 s, made 3min ago",
