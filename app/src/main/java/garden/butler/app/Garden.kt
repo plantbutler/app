@@ -217,6 +217,11 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
 
 fun hasOverride(c: ControllerHealth): Boolean = c.nextS != null
 
+/** Whether the row offers its "refilled" and "reset" chips. A retired board
+ * is out of service: a refill it will never water from and an interval it
+ * will never be asked at are buttons that do nothing, so it gets neither. */
+fun offersChips(c: ControllerHealth): Boolean = c.retired != 1
+
 /** "proposal: 100 ml, cap 10 s, made 3min ago" — what learning mode wants to
  * pour and is waiting for a tap on. */
 fun proposalLine(p: Proposal, nowS: Long): String {
