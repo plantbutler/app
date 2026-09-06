@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -33,6 +34,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -122,7 +124,16 @@ private fun GardenList(
                 item { ProblemStrip(garden.problems) }
             }
             if (garden.health.controllers.isNotEmpty()) {
-                item { ControllersCard(garden.health, nowS, cachedAtS == null, model::resetInterval) }
+                item {
+                    ControllersCard(
+                        garden.health,
+                        nowS,
+                        cachedAtS == null,
+                        model::resetInterval,
+                        model::refill,
+                        model::resume,
+                    )
+                }
             }
             if (listNote != null) {
                 item {
@@ -213,10 +224,21 @@ private fun ProblemStrip(problems: List<String>) {
     }
 }
 
-/** One line per controller; a leftover interval override (a wizard that
- * could not restore it) gets its reset here. */
+/** One line per controller, with a "refilled" chip — the human event the
+ * stuck-float rule measures against; a leftover interval override (a wizard
+ * that could not restore it) gets its reset here. A board the butler has
+ * stopped watering gets the reason under its line and a Resume behind one
+ * question, since two of the three things to do happen at the tank and the
+ * board, not in this app. */
 @Composable
-private fun ControllersCard(health: Health, nowS: Long, live: Boolean, reset: (Int) -> Unit) {
+private fun ControllersCard(
+    health: Health,
+    nowS: Long,
+    live: Boolean,
+    reset: (Int) -> Unit,
+    refill: (Int) -> Unit,
+    resume: (Int) -> Unit,
+) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             health.controllers.forEach { c ->
@@ -226,11 +248,41 @@ private fun ControllersCard(health: Health, nowS: Long, live: Boolean, reset: (I
                         Modifier.weight(1f),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    AssistChip(
+                        onClick = { refill(c.controller) },
+                        enabled = live,
+                        label = { Text("refilled") },
+                    )
                     if (hasOverride(c)) {
                         AssistChip(
                             onClick = { reset(c.controller) },
                             enabled = live,
                             label = { Text("reset") },
+                        )
+                    }
+                }
+                c.latched?.let {
+                    var asking by remember(c.controller) { mutableStateOf(false) }
+                    Text(
+                        latchLine(c, nowS),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { asking = true }, enabled = live) { Text("Resume watering") }
+                    if (asking) {
+                        AlertDialog(
+                            onDismissRequest = { asking = false },
+                            title = { Text("Resume watering on ${boardName(c.controller)}?") },
+                            text = {
+                                Text(
+                                    "Only after the tank has been checked and `clear contra` has been " +
+                                        "typed on the board. The butler will queue water again."
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { asking = false; resume(c.controller) }) { Text("Resume") }
+                            },
+                            dismissButton = { TextButton(onClick = { asking = false }) { Text("Not yet") } },
                         )
                     }
                 }

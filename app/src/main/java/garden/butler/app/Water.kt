@@ -16,8 +16,11 @@ const val FOLLOW_MAX_S = 240L
 private val WATER_KEYS = setOf("controller", "outlet", "dose_ml")
 
 /** Null when the tap may go through; else the reason, most fundamental
- * first. The cooldown, the daily cap and the float gate are not here on
- * purpose: a manual command bypasses the rules, and the firmware protects. */
+ * first: a cached garden, a buried pot, no mapping, no dose, an unsaved
+ * controller/outlet/dose edit, a silent board, a stopped board, a busy
+ * slot, a proposal waiting. The cooldown, the daily cap and the float gate
+ * are not here on purpose: a manual command bypasses the rules, and the
+ * firmware protects. */
 fun cannotWater(
     pot: Pot,
     controller: ControllerHealth?,
@@ -42,6 +45,9 @@ fun cannotWater(
     if (controller == null || controller.lastSeen == 0L) return "$c has never reported"
     if (nowS - controller.lastSeen > silentAfterS(controller.nextS, nextDefault)) {
         return "$c is silent (last reported ${agoText(controller.lastSeen, nowS)})"
+    }
+    controller.latched?.let {
+        return "$c stopped watering (${latchReason(it.reason)}) — $LATCH_STEPS it on the garden screen"
     }
     controller.command?.let { return "busy: cmd ${it.id} ${it.state} on $c" }
     if (pot.proposal != null) return "a proposal is waiting above — approve it or let it expire"

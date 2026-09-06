@@ -59,6 +59,29 @@ class BackendTest {
     }
 
     @Test
+    fun `health carries the tank fields, and a 0_17 backend leaves them defaulted`() {
+        val health =
+            parseHealth(
+                """{"ok": true, "controllers": [
+                     {"controller": 0, "last_seen": 5, "latched": {"since": 4, "reason": "contra"},
+                      "last_refill": 3, "err": "contra", "err_ts": 4, "retired": 0, "pos_ok_seen": 2},
+                     {"controller": 1, "last_seen": 5}
+                   ]}""",
+            )
+        val (latched, plain) = health.controllers
+        assertEquals(Latch(since = 4, reason = "contra"), latched.latched)
+        assertEquals(3L, latched.lastRefill)
+        assertEquals("contra" to 4L, latched.err to latched.errTs)
+        assertEquals(0, latched.retired)
+        assertEquals(2L, latched.posOkSeen)
+        assertNull(plain.latched)
+        assertNull(plain.lastRefill)
+        assertNull(plain.err)
+        assertEquals(0, plain.retired)
+        assertNull(plain.posOkSeen)
+    }
+
+    @Test
     fun `an empty garden parses to an empty list`() {
         assertEquals(emptyList(), parsePots("""{"pots": []}"""))
     }

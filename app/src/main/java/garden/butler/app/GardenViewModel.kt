@@ -964,8 +964,34 @@ class GardenViewModel(
     private fun resetIntervalNow(controller: Int) =
         act({
             val next = backend.interval(controller, 0)
-            "$controller reports every ${next ?: "default"}s again"
+            "${boardName(controller)} reports every ${next ?: "default"}s again"
         }) { noteOnList.value = it }
+
+    /** The human refilled the tank: the butler records when, and the
+     * stuck-float rule has something to measure against. */
+    fun refill(controller: Int) {
+        staleRefusal()?.let { why ->
+            noteOnList.value = why
+            return
+        }
+        act({
+            backend.refill(controller)
+            "${boardName(controller)}: refill noted"
+        }) { noteOnList.value = it }
+    }
+
+    /** The human checked the tank (and typed clear contra on the board):
+     * the butler queues water for this board again. */
+    fun resume(controller: Int) {
+        staleRefusal()?.let { why ->
+            noteOnList.value = why
+            return
+        }
+        act({
+            backend.resume(controller)
+            "${boardName(controller)} waters again"
+        }) { noteOnList.value = it }
+    }
 
     /** The wizard calibrates what the backend stores, so an unsaved draft
      * refuses; and it decides on a fresh read, since the list may be a

@@ -23,6 +23,8 @@ state flows, pure functions for every decision, JVM tests only.
    status line worded to it. See "What is here".
 3. **Manage the garden** — done (app#2). Names, thresholds, channel/valve/plant mapping,
    recalibration capture, controller health, approve/verdict. See "What is here".
+4. **I refilled the tank** — done (app#17, this PR): a refilled chip per board, and a stopped
+   board's card with why and a Resume behind a confirmation.
 
 Since 2026-09-04 the form explains itself: an ⓘ beside every field opens a one-sentence dialog,
 and the two sizes are measurements — `plant height (cm)` and `pot diameter (cm)` — which the
@@ -60,17 +62,26 @@ is on screen. Nothing is queued to send later.
 
 - `Backend.kt` — the wire models (`Pot` with its `pot-xxxxxx` id, its nickname, `species` and
   every other pots column, `Proposal`, `LastDose`,
-  `Health` with `next_default` and per-controller `command`), `Json { ignoreUnknownKeys }`,
-  and the one class that touches the network: GETs, and `post()` for `/pot`, `/approve`,
-  `/verdict`, `/interval` with the `X-Token` header. Any non-200 throws `Refused(code, text)`
-  carrying the backend's text verbatim ("refused: …", "busy: …", "try again: …"); the app
-  shows it as is. The backend's merged-row checks are the validation.
+  `Health` with `next_default` and per-controller `command`, `Latch` and the tank fields on
+  `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`)),
+  `Json { ignoreUnknownKeys }`, and the one class that touches the network: GETs, `post()` for
+  `/pot`, `/approve`, `/verdict`, `/interval` with the `X-Token` header, and `refill()` and
+  `resume()` (`POST /refill` and `POST /resume`, body `c=<n>`, both handing back the raw
+  answer — `refill=<ts>`, `resumed=<n>` — since the app only reports that it went through;
+  `parseNextAnswer` is the one answer that is read). Any non-200 throws
+  `Refused(code, text)` carrying the backend's text verbatim ("refused: …", "busy: …", "try
+  again: …"); the app shows it as is. The backend's merged-row checks are the validation.
 - `Garden.kt` — pure lines and splits: `splitGarden` (pots / env / disabled + the health it
-  came with), `problems` (raised alerts + app-side silence with `next_default`), the
-  controller line, proposal and dose lines, `needsVerdict` (a dose acked between 30 min and
-  48 h ago with no verdict), `learningGaps` (what the rules need, including the board's
-  `float=1 pos=ok`), `potById` (the key everything navigates by; an empty id is never a key)
-  and `potNamed` (only the two places that have a name and not an id).
+  came with), `problems` (raised alerts + app-side silence with `next_default`, a stopped
+  board, and the pos line gated on `pos_ok_seen`), the latch and stale alert descriptions, the
+  controller line with the STOPPED and retired marks on it, `latchLine`/`latchReason` (the
+  board's reason in a person's words) and `LATCH_STEPS` (what to do about a stopped board —
+  check the tank, type clear contra on the board, then resume — said once, because the water
+  button's refusal in `Water.kt` repeats it and used to drop the `clear contra` step, without
+  which a resume re-latches at the next report), proposal and dose lines, `needsVerdict` (a dose acked
+  between 30 min and 48 h ago with no verdict), `learningGaps` (what the rules need, including
+  the board's `float=1 pos=ok`), `potById` (the key everything navigates by; an empty id is
+  never a key) and `potNamed` (only the two places that have a name and not an id).
 - `PotForm.kt` — the form is one `Map<String,String>` draft diffed against the stored pot:
   `POT_FIELDS` (key, label, keyboard, and the sentence behind the ⓘ — every field has one, since
   seventeen boxes labelled in wire names is a form only its author can fill in), `PLANT_KINDS`
@@ -99,7 +110,7 @@ is on screen. Nothing is queued to send later.
   were issued from. The wizard driver arms the board with `next=5`, decides on a fresh fetch,
   never takes a standing 5 s as the pace to restore, and restores `prevNextS ?: 0` on every
   exit — the controllers card's reset chip is the recovery path when that fails or the
-  process died.
+  process died. `refill`/`resume` are two more actions, in `resetInterval`'s shape.
 - `Chart.kt` — the moisture chart as data: `ChartWindow` (day / week / month, each with the
   bucket that keeps the point count near a day's 288 — a month at five-minute buckets would be
   8640 points and the backend refuses over 2016), `windowTicks` (hours across a day, dates across
@@ -144,9 +155,9 @@ is on screen. Nothing is queued to send later.
   number without a person tapping it, and Not now is remembered against those numbers so a repot
   or a change of season asks again. The photographs are the app's only images (Coil).
 - `Water.kt` — the water-now button as pure decisions: `cannotWater` (disabled pot, no
-  mapping, no dose, an unsaved controller/outlet/dose edit, a silent board, a busy slot, a
-  proposal waiting — in that order), `waterStatus` from `/pots` `last_dose` and `/health`'s
-  slot for the one id this form issued (acked → done with the meter, expired → "maybe
+  mapping, no dose, an unsaved controller/outlet/dose edit, a silent board, a stopped board,
+  a busy slot, a proposal waiting — in that order), `waterStatus` from `/pots` `last_dose` and
+  `/health`'s slot for the one id this form issued (acked → done with the meter, expired → "maybe
   nothing poured, maybe the ack was lost", past four minutes → "no news — check the
   controllers card"), `stillFollowing` (a 15 s refresh only while the fate is open, only
   while RESUMED, measured on the phone clock), `waterDialogText` (the one confirmation:
