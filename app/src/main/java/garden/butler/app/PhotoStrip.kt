@@ -46,24 +46,17 @@ import kotlinx.coroutines.withContext
 
 private val THUMB = 104.dp
 
-/** A pot's own photographs, oldest first, with the camera at the end.
- *
- * Whether a month of watering did the plant any good is a question a
- * photograph answers and a moisture chart does not — so this sits under the
- * chart and reads the same way, left to right, over time.
- *
- * The care source's picture of the species, when there is one, sits first
- * and dimmed: it is the reference, what this plant is supposed to look
- * like, and never a stand-in for a picture of the actual pot.
- */
+/** A pot's own photographs, oldest first, with the camera at the end — reads
+ * the same way as the chart above it, left to right, over time. The care
+ * source's picture of the species, when there is one, sits first and dimmed:
+ * the reference, never a stand-in for a picture of the actual pot. */
 @Composable
 fun PhotoStrip(screen: Screen.Pot, pot: Pot?, model: GardenViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val nowS = System.currentTimeMillis() / 1000
     // One name, reused: the full-size original is worth nothing once it has
-    // been shrunk and sent, and keeping them would be exactly the several
-    // megabytes each that the pitch says to keep off the phone.
+    // been shrunk and sent, so nothing keeps several megabytes on the phone for it.
     val target = remember { cameraFile(context) }
     val uri =
         remember(target) {
@@ -120,9 +113,8 @@ fun PhotoStrip(screen: Screen.Pot, pot: Pot?, model: GardenViewModel) {
                         }
                     }
                     items(ordered, key = { it.id }) { photo ->
-                        // A pot outlives its plant, and nothing records a
-                        // replant: the mark is where the species the picture
-                        // was taken under changed.
+                        // A pot outlives its plant and no replant is recorded, so the
+                        // mark is where the photographed species changed.
                         if (photo.id in breaks) {
                             Break(photo.species)
                         }

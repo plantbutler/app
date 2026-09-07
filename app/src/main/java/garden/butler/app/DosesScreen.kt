@@ -30,13 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** The watering history: one pot's, or the whole garden's. Every row's
- * words come from a pure function in `Doses.kt`; this file is layout.
- *
- * The rows that went wrong are not filtered out — they are the reason the
- * screen exists — so they carry their own line in the error colour instead
- * of hiding among the clean ones.
- */
+/** The watering history: one pot's, or the whole garden's. The rows that
+ * went wrong are the reason the screen exists, so they are never filtered
+ * out — each carries its own line in the error colour among the clean ones. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DosesScreen(model: GardenViewModel, screen: Screen.Doses) {
