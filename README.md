@@ -44,13 +44,17 @@ than a rebuild.
 | screen | what it shows |
 | --- | --- |
 | the garden | every plant, its soil moisture, the room readings, and anything wrong |
-| one pot | the moisture curve over a day, a week or a month, a water button, the photographs |
+| one pot | the moisture curve over a day, a week or a month, a water button, the photographs, and what is known about the species |
 | the pot form | the name, the wiring, the target range, the kind of plant, the soil, the sizes |
 | the watering history | every dose, why it happened and how it turned out |
-| the calibration wizard | the sensor in the air, then in water, to learn what dry and wet mean |
+| the calibration wizard | hold the sensor in the air, then in water, so the backend learns what this pot's dry and wet readings are |
 | setup | where the backend is and what its token is |
 
 ## Files
+
+The app never talks to the board. Some of what it shows is about a board, though: whether one has
+stopped itself and needs a person, and whether its water tank was refilled. Those go through the
+backend like everything else.
 
 Everything is in one package, `garden.butler.app`. Three kinds of file, and the kind is the name:
 
@@ -62,13 +66,14 @@ Everything is in one package, `garden.butler.app`. Three kinds of file, and the 
 | file | what it holds |
 | --- | --- |
 | `GardenViewModel.kt` | the state flows, the refresh, the clocks; one class, one of each flow |
-| `Model*.kt` | that class's actions, by concern: the wizard, setup, photographs, species, doses, boards |
+| `Model*.kt` | that class's actions, by concern: the calibration wizard, the setup screen, photographs, the species lookup, the watering history, and the buttons that resume a stopped board or record a refill |
 | `State.kt` | the shapes the screens read: what the app is showing and which screen is up |
 | `Backend.kt` | the wire: what is sent, what comes back |
 | `Settings.kt` | the address and the token, in the phone's encrypted store |
 | `Cache.kt` | the last garden seen, so a phone off the network still shows something |
 | `Main.kt` | the one activity, and the choice of which screen is up |
 | `PhotoFile.kt` | turning a camera picture upright and small enough to send |
+| `Care.kt` | what the backend says about a species, and the target range it offers for a pot |
 | `Widgets.kt` | the few small pieces every screen draws the same way |
 
 Where to go: a new screen is a case in `State.kt` plus its own `*Screen.kt` and a branch in
