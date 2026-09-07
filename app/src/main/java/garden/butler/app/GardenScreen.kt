@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+/** The garden list: every plant, the room readings and anything wrong. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GardenScreen(model: GardenViewModel) {
@@ -107,14 +108,12 @@ private fun GardenList(
     model: GardenViewModel,
 ) {
     val nowS = System.currentTimeMillis() / 1000
-    // A long press, never a swipe: a swipe fires while the list is being
-    // scrolled, and one of these two actions cannot be taken back.
+    // Long press, not swipe: a swipe fires mid-scroll, and both actions here matter.
     var sheetFor by remember { mutableStateOf<Pot?>(null) }
     sheetFor?.let { RowActions(it, model) { sheetFor = null } }
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = model::refresh) {
         LazyColumn(Modifier.fillMaxSize()) {
-            // The age has to be as loud as the numbers it qualifies: a
-            // stale reading shown without it is worse than showing nothing.
+            // A stale reading shown without its age is worse than showing nothing.
             if (cachedAtS != null) {
                 item { CachedBanner(staleLine(cachedAtS, nowS)) }
             } else if (why != null) {
@@ -177,9 +176,8 @@ private fun GardenList(
     }
 }
 
-/** Nothing on this screen came from the butler this launch. Loud on
- * purpose, in the error colour and above everything, because every number
- * underneath it is a memory. */
+/** Nothing on screen came from the butler this launch — every number below is a
+ * memory, so this is loud on purpose: error colour, above everything else. */
 @Composable
 private fun CachedBanner(line: String) {
     Card(
@@ -224,19 +222,10 @@ private fun ProblemStrip(problems: List<String>) {
     }
 }
 
-/** One line per controller, with a "refilled" chip — the tap, the human
- * event the tank is measured from and the only thing that clears OVER.
- * The stuck-float rule counts from that tap, or from the float's own rise
- * once the tank drained after it and was refilled untapped (`pumpedMl`'s
- * doc in Backend.kt), so the counter can start later than the tap the row
- * names. A leftover interval override (a wizard that could not
- * restore it) gets its reset here. A retired board offers neither chip.
- * Under the line, while the
- * tank is still being learnt, the one sentence that says what the tap
- * means; a board presumed stuck at full gets what to do about it in the
- * error colour. A board the butler has stopped watering gets the reason
- * under its line and a Resume behind one question, since two of the three
- * things to do happen at the tank and the board, not in this app. */
+/** One line per controller. "refilled" is the human tap that clears OVER and
+ * marks where the tank measurement restarts; a retired board offers neither
+ * chip. A stopped board's Resume sits behind a confirmation, since two of the
+ * three fixes happen at the tank and the board, not in this app. */
 @Composable
 private fun ControllersCard(
     health: Health,
@@ -328,10 +317,8 @@ private fun EnvCard(env: List<Pot>, nowS: Long, open: (String) -> Unit) {
     }
 }
 
-/** The two things worth doing to a row without opening it. Both end up in
- * the form anyway — this only saves the trip — so neither is destructive
- * from here: Delete opens the pot and its confirmation lives there, beside
- * the sentence that says what goes. */
+/** The two things worth doing to a row without opening it. Neither is
+ * destructive here: Delete opens the pot, whose confirmation names what goes. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RowActions(pot: Pot, model: GardenViewModel, dismiss: () -> Unit) {
@@ -387,10 +374,8 @@ private fun PotRow(
 ) {
     ListItem(
         modifier = Modifier.combinedClickable(onClick = { open(pot.id) }, onLongClick = longPress),
-        // The newest picture, small, so a list of names becomes a list of
-        // plants. A pot that has never been photographed gets no placeholder:
-        // an empty grey square in every row is noise, and the rows simply
-        // start at the name as they always did.
+        // A pot never photographed gets no placeholder: an empty grey square
+        // in every row is noise, so the row just starts at the name.
         leadingContent =
             pot.photo?.let { photoId ->
                 {

@@ -70,9 +70,8 @@ import kotlinx.coroutines.delay
 private val MODES = listOf("manual", "learning", "auto")
 private val VERDICTS = listOf("ok", "too_much", "too_little")
 
-/** One pot: what it reads now, what waits for a tap, and the form. The
- * form renders from the screen's own snapshot, so a pot that vanishes
- * mid-edit does not blank the fields. */
+/** One pot: current reading, chart and edit form — rendered from the screen's
+ * own snapshot, so a pot that vanishes mid-edit does not blank the fields. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
@@ -80,8 +79,8 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     val garden = (state as? UiState.Ready)?.garden
     val cachedAtS = (state as? UiState.Ready)?.cachedAtS
     val pot = screen.id?.let { garden?.potById(it) }
-    // The title follows the pot, not the key: a rename lands here on the
-    // next refresh. A pot that vanished keeps the name the form opened on.
+    // Keyed on the pot, not fixed at open: a rename shows up on the next
+    // refresh, and a pot that vanished keeps the name the form opened on.
     val title = pot?.name ?: screen.original["name"] ?: "New pot"
     val nowS = model.nowS()
     val emptied = emptiedFields(screen.original, screen.draft)
@@ -90,8 +89,8 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     var askDiscard by remember { mutableStateOf(false) }
     val leave = { if (dirty) askDiscard = true else model.back() }
     BackHandler(onBack = leave)
-    // The queued dose is followed from here, not the model: polling stops
-    // with the screen, and reads the latest form so Done/Expired ends it.
+    // Polling for the queued dose lives on the screen, not the model, so it
+    // stops when the screen does, and reads the latest form so Done/Expired ends it.
     val latest by rememberUpdatedState(screen)
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(screen.watering) {
@@ -103,10 +102,8 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             }
         }
     }
-    // One field's ⓘ. A dialog rather than a tooltip: it is the same
-    // gesture as everything else on this screen, it survives a rotation,
-    // and a long-press hint on a form nobody knows has hints is a hint
-    // nobody finds.
+    // A dialog, not a tooltip: it survives rotation and uses the same tap
+    // gesture as the rest of the screen, unlike a long-press nobody finds.
     fieldFor(screen.explaining)?.let { field ->
         AlertDialog(
             onDismissRequest = model::stopExplaining,
@@ -147,9 +144,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             if (pot != null) Text(potLine(pot, nowS), style = MaterialTheme.typography.headlineSmall)
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
-            // Gated on the pot alone: the chart is history, and a pot that
-            // has been unwired — brought back from the graveyard, or waiting
-            // to be replugged — still owns every reading it ever took.
+            // Gated on the pot alone: an unwired pot still owns every reading it ever took.
             if (pot != null) {
                 Chart(
                     screen.history,
@@ -161,9 +156,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                     model::setChartWindow,
                 )
             }
-            // Under the curve, and read the same way: left to right, over
-            // time. An environment pot is a sensor on a shelf and has no
-            // plant to photograph.
+            // An environment pot is a sensor on a shelf, not a plant, so no strip.
             if (pot == null || !pot.name.startsWith(ENV_PREFIX)) {
                 PhotoStrip(screen, pot, model)
             }
@@ -176,8 +169,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                     model,
                 )
             }
-            // Stale: every one of these would be refused, so they look it
-            // rather than only saying so after the tap.
+            // Stale data disables these rather than refusing only after the tap.
             val live = cachedAtS == null
             if (pot?.status == ALIVE) { // a buried pot is neither proposed for nor dosed
                 pot.proposal?.let { ProposalCard(it, nowS, live) { model.approve(it.id) } }
@@ -189,7 +181,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             if (pot != null) {
                 TextButton(
                     onClick = { model.openDoses(pot.id, "${pot.name}'s water") },
-                    enabled = !screen.saving, // leaving mid-save would strand this form
+                    enabled = !screen.saving, // mid-save, leaving would strand the form
                 ) {
                     Text("Watering history")
                 }
@@ -208,8 +200,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                 )
             }
             val named = !screen.draft["name"].isNullOrBlank()
-            // Save goes grey without a name; say so, the way a blanked
-            // stored field says so, rather than leave the user hunting.
+            // Save goes grey without a name; say so rather than leave it unexplained.
             if (!named) {
                 Text("give the pot a name", style = MaterialTheme.typography.bodySmall)
             }
@@ -222,9 +213,8 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             screen.refused?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
-            // Last, below Save, and only for a pot that exists. The
-            // graveyard is the reversible answer and is a chip in the form
-            // above; this one is not, so it stands apart and asks.
+            // The graveyard chip above is the reversible answer; this is not,
+            // so it stands apart, below Save, and only for a pot that exists.
             if (screen.id != null) {
                 HorizontalDivider()
                 Erase(screen.id, pot?.name ?: screen.original["name"].orEmpty(), live, model)
@@ -233,10 +223,9 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     }
 }
 
-/** Erasing the pot. Two taps, and the second one names the plant and says
- * what goes — a list, not a "this cannot be undone" nobody reads. Greyed
- * while the screen is a memory: the one irreversible action here must not
- * be the one thing allowed against a garden nobody has confirmed. */
+/** Erasing the pot. Two taps; the second names the plant and lists what goes,
+ * not a generic "cannot be undone". Disabled while the screen is a cached
+ * memory — the one irreversible action must never be the one thing still allowed. */
 @Composable
 private fun Erase(potId: String, name: String, live: Boolean, model: GardenViewModel) {
     var asking by remember(potId) { mutableStateOf(false) }
@@ -290,11 +279,9 @@ private fun draftPot(draft: Map<String, String>, stored: Pot?): Pot =
         doseMl = draft["dose_ml"]?.toIntOrNull(),
     )
 
-/** The last 24 h as a polyline over faint gridlines: % under the pot's
- * calibration inside its target band, else raw counts on their own span.
- * The axis values sit just inside the plot, the wall-clock hours under it.
- * A silent stretch is a hole, not a straight line across it; the last dose
- * is a hairline. */
+/** The chosen window as a polyline over faint gridlines: % inside the pot's
+ * target band when calibrated, else raw counts on their own span. A silent
+ * stretch is a gap, not a straight line across it; the last dose is a hairline. */
 @Composable
 private fun Chart(
     history: History?,
@@ -305,8 +292,7 @@ private fun Chart(
     window: ChartWindow,
     onWindow: (ChartWindow) -> Unit,
 ) {
-    // The chips stay up while the next window loads: they are how you get
-    // back, and a spinner you cannot leave is a trap.
+    // The chips stay up while the next window loads: a spinner you cannot leave is a trap.
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ChartWindow.entries.forEach { w ->
             FilterChip(selected = w == window, onClick = { onWindow(w) }, label = { Text(w.label) })
@@ -318,9 +304,8 @@ private fun Chart(
         return
     }
     val caption = chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX))
-    // Where the finger is, in pixels, and how wide the canvas is. The
-    // decision itself is scrubbed(), a pure function with a test; this is
-    // only the plumbing. -1 means nothing is touching it.
+    // Finger position in pixels and canvas width; -1 means nothing is touching
+    // it. The decision itself is scrubbed(), a pure function — this is only plumbing.
     var scrubX by remember { mutableFloatStateOf(-1f) }
     var widthPx by remember { mutableIntStateOf(0) }
     var scrubText: String? = null
@@ -418,8 +403,8 @@ private fun Chart(
             }
         }
     }
-    // Under the finger, the sample's own value and its own time — never an
-    // interpolation, which would be a reading that never happened.
+    // Under the finger: the sample's own value and time, never an
+    // interpolation — that would be a reading that never happened.
     if (scrubText != null) {
         Text(scrubText, style = MaterialTheme.typography.bodyMedium)
     } else {
@@ -428,10 +413,9 @@ private fun Chart(
     why?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }
 
-/** The button waters the stored pot, and says under itself why it cannot,
- * or where the queued dose has got to. While the dose is queued or sent
- * the slot's "busy" reason stays hidden: that is this form's own command;
- * and "no news" stands alone, since the reason under it would be a guess. */
+/** Waters the stored pot, and says under itself why it cannot, or where the
+ * queued dose has got to. The slot's "busy" reason stays hidden while the
+ * dose is queued or sent — that busy slot is this form's own command. */
 @Composable
 private fun WaterRow(screen: Screen.Pot, pot: Pot, reason: String?, model: GardenViewModel) {
     val status = screen.watering?.let { model.currentWaterStatus(screen) ?: WaterStatus.Queued }
@@ -499,8 +483,8 @@ private fun Form(
     model: GardenViewModel,
 ) {
     val draft = screen.draft
-    // A stored pot's nickname is editable too: the id is the key, so this
-    // field renames rather than creating a second pot.
+    // The id is the key, so editing the nickname here renames the pot
+    // rather than creating a second one.
     OutlinedTextField(
         value = draft["name"].orEmpty(),
         onValueChange = { model.edit("name", it) },
@@ -523,9 +507,8 @@ private fun Form(
     }
     for (field in POT_FIELDS) {
         when (field.key) {
-            // Three bare chips with nothing above them said neither what
-            // they were nor that manual, learning and auto are three
-            // different amounts of trust.
+            // The label above the chips says both what they are and that
+            // manual, learning and auto are three different amounts of trust.
             "mode" -> {
                 Labelled(field, model)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -538,8 +521,8 @@ private fun Form(
                     }
                 }
             }
-            // Two words, so chips rather than a dropdown: both are visible
-            // at once and burying a plant is worth seeing before tapping.
+            // Chips, not a dropdown: both words visible at once, since
+            // burying a plant is worth seeing before tapping.
             "status" -> {
                 Labelled(field, model)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -585,9 +568,8 @@ private fun Form(
                 SpeciesPanel(screen, model)
             }
             "wet_raw" -> Unit
-            // A closed set is picked, never typed. Free text on the plant
-            // kind used to look saved and match nothing, which is the one
-            // way to be twenty points out without a word of warning.
+            // A closed set is picked, never typed: free text here can silently
+            // drift the water target with no warning.
             else ->
                 if (field.input == Input.PICK) {
                     Picker(field, draft, model)
@@ -620,23 +602,20 @@ private fun ValueField(
 private fun keyboardFor(input: Input): KeyboardType =
     when (input) {
         Input.INTEGER -> KeyboardType.Number
-        // A measurement in centimetres is allowed a decimal point, and a
-        // keyboard without one makes 14.5 impossible to type.
+        // Centimetre measurements need a decimal point, or 14.5 is untypeable.
         Input.DECIMAL -> KeyboardType.Decimal
         // PICK never reaches a keyboard; TEXT is the only one left that does.
         else -> KeyboardType.Text
     }
 
-/** One closed set as a dropdown. The read-only field shows the LABEL and
- * the draft holds the wire word, so renaming a choice on screen can never
- * become a wire change.
+/** One closed set as a dropdown. The read-only field shows the LABEL while
+ * the draft holds the wire word, so renaming a choice on screen never
+ * becomes a wire change.
  *
- * "Not said" is the first entry and a real answer, not a placeholder: for
- * the plant kind it is the band an unlabelled plant already has, and for
- * the soil it is ordinary potting compost, which is what every other value
- * is measured against. It writes an empty draft value, which the wire
- * cannot send — so it clears nothing that was already stored, and the form
- * says so under Save rather than pretending otherwise. */
+ * "Not said" is a real answer, not a placeholder — the unlabelled band for
+ * plant kind, ordinary potting compost for soil. It writes an empty draft
+ * value, which the wire cannot send, so it clears nothing already stored;
+ * the form says so under Save rather than pretending otherwise. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Picker(field: Field, draft: Map<String, String>, model: GardenViewModel) {
