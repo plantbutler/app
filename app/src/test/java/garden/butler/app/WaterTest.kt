@@ -9,16 +9,6 @@ import kotlin.test.assertTrue
 private val ready =
     Pot(name = "basil", controller = 0, channel = 0, outlet = 3, doseMl = 100)
 
-private fun controller(
-    lastSeen: Long = 990,
-    nextS: Int? = null,
-    command: InFlight? = null,
-    latched: Latch? = null,
-) = ControllerHealth(0, lastSeen = lastSeen, nextS = nextS, command = command, latched = latched)
-
-private fun dose(id: Long, state: String, flowMl: Int? = null) =
-    LastDose(id, ml = 100, flowMl = flowMl, state = state)
-
 private val issued = QueuedDose(17, ts = 1000)
 
 class WaterTest {
@@ -122,18 +112,18 @@ class WaterTest {
 
     @Test
     fun `the pot's last dose says sent, done or expired`() {
-        assertEquals(WaterStatus.Sent, waterStatus(issued, ready.copy(lastDose = dose(17, "sent")), controller(), 1010, false))
+        assertEquals(WaterStatus.Sent, waterStatus(issued, ready.copy(lastDose = lastDose(17, "sent")), controller(), 1010, false))
         assertEquals(
             WaterStatus.Done(96),
-            waterStatus(issued, ready.copy(lastDose = dose(17, "acked", flowMl = 96)), controller(), 1010, false),
+            waterStatus(issued, ready.copy(lastDose = lastDose(17, "acked", flowMl = 96)), controller(), 1010, false),
         )
-        assertEquals(WaterStatus.Done(null), waterStatus(issued, ready.copy(lastDose = dose(17, "acked")), null, 1010, false))
-        assertEquals(WaterStatus.Expired, waterStatus(issued, ready.copy(lastDose = dose(17, "expired")), null, 1010, false))
+        assertEquals(WaterStatus.Done(null), waterStatus(issued, ready.copy(lastDose = lastDose(17, "acked")), null, 1010, false))
+        assertEquals(WaterStatus.Expired, waterStatus(issued, ready.copy(lastDose = lastDose(17, "expired")), null, 1010, false))
     }
 
     @Test
     fun `another command's id is not this one`() {
-        val other = ready.copy(lastDose = dose(16, "acked", flowMl = 96))
+        val other = ready.copy(lastDose = lastDose(16, "acked", flowMl = 96))
         assertNull(waterStatus(issued, other, controller(command = InFlight(18)), 1010, false))
         assertNull(waterStatus(issued, null, null, 1010, false))
     }
@@ -160,8 +150,8 @@ class WaterTest {
             WaterStatus.NoNews,
             waterStatus(issued, ready, controller(command = InFlight(17, state = "sent")), past, false),
         )
-        assertEquals(WaterStatus.Sent, waterStatus(issued, ready.copy(lastDose = dose(17, "sent")), controller(), atEdge, false))
-        assertEquals(WaterStatus.NoNews, waterStatus(issued, ready.copy(lastDose = dose(17, "sent")), controller(), past, false))
+        assertEquals(WaterStatus.Sent, waterStatus(issued, ready.copy(lastDose = lastDose(17, "sent")), controller(), atEdge, false))
+        assertEquals(WaterStatus.NoNews, waterStatus(issued, ready.copy(lastDose = lastDose(17, "sent")), controller(), past, false))
     }
 
     @Test
@@ -169,9 +159,9 @@ class WaterTest {
         val past = 1000 + FOLLOW_MAX_S + 1
         assertEquals(
             WaterStatus.Done(96),
-            waterStatus(issued, ready.copy(lastDose = dose(17, "acked", flowMl = 96)), controller(), past, false),
+            waterStatus(issued, ready.copy(lastDose = lastDose(17, "acked", flowMl = 96)), controller(), past, false),
         )
-        assertEquals(WaterStatus.Expired, waterStatus(issued, ready.copy(lastDose = dose(17, "expired")), null, past, true))
+        assertEquals(WaterStatus.Expired, waterStatus(issued, ready.copy(lastDose = lastDose(17, "expired")), null, past, true))
     }
 
     @Test

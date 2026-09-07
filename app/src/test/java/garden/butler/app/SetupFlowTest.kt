@@ -11,14 +11,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlin.test.fail
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.newSingleThreadContext
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -30,8 +22,7 @@ import okhttp3.mockwebserver.RecordedRequest
  * only exists when there are two — the cache belongs to one of them, and an
  * answer from the old one must never land on the new one's screen.
  */
-@OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
-class SetupFlowTest {
+class SetupFlowTest : ModelTest() {
     /** A butler with one pot, whose name says which butler it is. */
     private class Fake(val plant: String, val token: String = "s3cret") : Dispatcher() {
         val requests = CopyOnWriteArrayList<RecordedRequest>()
@@ -81,35 +72,15 @@ class SetupFlowTest {
         }
     }
 
-    private class FakeCache(var held: CachedGarden? = null) : GardenCache {
-        val writes = CopyOnWriteArrayList<CachedGarden>()
-        @Volatile var cleared = 0
-
-        override fun read(): CachedGarden? = held
-
-        override fun write(cached: CachedGarden) {
-            writes += cached
-            held = cached
-        }
-
-        override fun clear() {
-            cleared++
-            held = null
-        }
-    }
-
-    private val main = newSingleThreadContext("main")
     private val one = MockWebServer()
     private val two = MockWebServer()
     private val here = Fake("basil")
     private val there = Fake("mint", token = "other")
     private val settings = FakeSettings()
     private val cache = FakeCache()
-    private lateinit var model: GardenViewModel
 
     @BeforeTest
     fun start() {
-        Dispatchers.setMain(main)
         one.dispatcher = here
         two.dispatcher = there
         one.start()
@@ -120,8 +91,6 @@ class SetupFlowTest {
     fun stop() {
         one.shutdown()
         two.shutdown()
-        Dispatchers.resetMain()
-        main.close()
     }
 
     private fun url(server: MockWebServer) = server.url("/").toString().trimEnd('/')
@@ -138,22 +107,7 @@ class SetupFlowTest {
             )
     }
 
-    private fun onMain(block: GardenViewModel.() -> Unit) =
-        runBlocking(Dispatchers.Main) { model.block() }
-
-    private fun <T : Any> waitFor(what: String, get: () -> T?): T {
-        val deadline = System.currentTimeMillis() + 5000
-        while (System.currentTimeMillis() < deadline) {
-            get()?.let { return it }
-            Thread.sleep(20)
-        }
-        fail("timed out waiting for $what")
-    }
-
     private fun setup(): Screen.Setup = waitFor("the setup screen") { model.screen.value as? Screen.Setup }
-
-    private fun settled(): UiState.Ready =
-        waitFor("a settled garden") { (model.state.value as? UiState.Ready)?.takeIf { !it.refreshing } }
 
     private fun plants() = settled().garden.everyPot().map { it.name }
 

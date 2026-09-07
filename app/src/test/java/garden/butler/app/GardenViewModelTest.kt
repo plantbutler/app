@@ -1,284 +1,17 @@
 package garden.butler.app
 
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlin.test.fail
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.newSingleThreadContext
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.resetMain
-import kotlinx.coroutines.test.setMain
-import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
-import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 
-/** The view model against a fake butler on a real socket. Main is one real
- * thread (the model hops to Dispatchers.IO, which virtual time cannot
- * drive), so the tests wait for state rather than advance it. */
-@OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
-class GardenViewModelTest {
-    /** Routes by path, so a refresh the model fires after a write always
-     * finds an answer; the knobs stand in for what the backend would have
-     * changed underneath. */
-    private class Butler : Dispatcher() {
-        val nowS = System.currentTimeMillis() / 1000
-        val requests = CopyOnWriteArrayList<RecordedRequest>()
-        val deleted = CopyOnWriteArrayList<String>()
-        @Volatile var nextS: Int? = null
-        @Volatile var failPots = false
-        @Volatile var potAnswer = MockResponse().setBody("pot=pot-1 name=basil\n")
-        @Volatile var potsGate: CountDownLatch? = null
-        @Volatile var potGate: CountDownLatch? = null
-        @Volatile var failHistory = false
-        @Volatile var failDoses = false
-        @Volatile var dosesSayNow = true
-        /** A first page as full as the app asks for, so there is a second. */
-        @Volatile var dosesPageFull = false
-        @Volatile var dosesGate: CountDownLatch? = null
-        @Volatile var proposal = false
-        @Volatile var lastDose: String? = null
-        @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
-        @Volatile var resumeAnswer = MockResponse().setBody("resumed=0\n")
-        /** What board 0's one slot holds, as /health shows it. */
-        @Volatile var slot: String? = null
-        /** The band the backend would offer pot-1, as /pots carries it. */
-        @Volatile var advice: String? = null
-        /** The pot's photographs, as the strip would be sent them. */
-        val photos = CopyOnWriteArrayList<String>()
-        @Volatile var failPhotos = false
-        @Volatile var photoAnswer = MockResponse().setBody("photo=photo-new ts=1757000000\n")
-        @Volatile var photoGate: CountDownLatch? = null
-        @Volatile var speciesAnswer =
-            MockResponse().setBody(
-                """{"query": "basil", "matched": "common", "accepted": "Ocimum basilicum",
-                    "care": {"found": true, "light": 7, "common_name": "Basil"},
-                    "candidates": [], "note": "Trefle: Ocimum basilicum"}""",
-            )
-
-        override fun dispatch(request: RecordedRequest): MockResponse {
-            requests += request
-            return when (request.path) {
-                "/pots" -> {
-                    potsGate?.await(5, TimeUnit.SECONDS)
-                    if (failPots) {
-                        MockResponse().setResponseCode(503).setBody("try again: x\n")
-                    } else {
-                        MockResponse().setBody(
-                            """{"pots": [
-                                 {"id": "pot-1", "name": "basil", "controller": 0, "channel": 0, "outlet": 3,
-                                  "mode": "manual", "target_low_pct": 30, "dose_ml": 100,
-                                  "raw": 9000, "read_ts": $nowS
-                                  ${if (proposal) ", \"proposal\": {\"id\": 9, \"ml\": 100}" else ""}
-                                  ${lastDose?.let { ", \"last_dose\": $it" } ?: ""}
-                                  ${advice?.let { ", \"advice\": $it" } ?: ""}},
-                                 {"id": "pot-2", "name": "mint", "controller": 0, "channel": 1, "mode": "learning"},
-                                 {"id": "pot-3", "name": "fern", "status": "graveyard",
-                                  "photo": "photo-abc123"}
-                               ]}""",
-                        )
-                    }
-                }
-                "/health" ->
-                    MockResponse().setBody(
-                        """{"ok": true, "next_default": 60, "last_ts": $nowS,
-                           "controllers": [{"controller": 0, "last_seen": $nowS,
-                                            "next_s": ${nextS ?: "null"}, "float": 1, "pos": "ok"
-                                            ${slot?.let { ", \"command\": $it" } ?: ""}}]}""",
-                    )
-                "/pot" -> {
-                    potGate?.await(5, TimeUnit.SECONDS)
-                    potAnswer
-                }
-                "/command" -> commandAnswer
-                "/refill" -> MockResponse().setBody("refill=1757000000\n")
-                "/resume" -> resumeAnswer
-                "/photo/delete" -> {
-                    photos.remove(
-                        request.body.copy().readUtf8().trim().removePrefix("photo="),
-                    )
-                    MockResponse().setBody("ok\n")
-                }
-                "/advice" -> MockResponse().setBody("ok\n")
-                "/pot/delete" -> {
-                    deleted += request.body.copy().readUtf8().trim().removePrefix("id=")
-                    MockResponse().setBody("ok\n")
-                }
-                "/interval" -> {
-                    // As the backend answers: the effective pace, and next=0
-                    // clears the override back to next_default.
-                    val asked = request.body.copy().readUtf8().substringAfter("next=").trim().toInt()
-                    MockResponse().setBody("next=${if (asked == 0) 60 else asked}\n")
-                }
-                else ->
-                    if (request.path?.startsWith("/photos") == true) {
-                        if (failPhotos) {
-                            MockResponse().setResponseCode(503).setBody("try again: x\n")
-                        } else {
-                            val rows =
-                                photos.mapIndexed { i, id ->
-                                    """{"id": "$id", "ts": ${nowS - 1000 + i}, "bytes": 400000,
-                                        "species": "Ocimum_basilicum"}"""
-                                }
-                            MockResponse().setBody(
-                                """{"pot": "pot-1", "more": false, "now": $nowS,
-                                    "photos": [${rows.joinToString(",")}]}""",
-                            )
-                        }
-                    } else if (request.path?.startsWith("/photo?") == true) {
-                        photoGate?.await(5, TimeUnit.SECONDS)
-                        photos += "photo-new"
-                        photoAnswer
-                    } else if (request.path?.startsWith("/species") == true) {
-                        speciesAnswer
-                    } else if (request.path?.startsWith("/history") == true) {
-                        if (failHistory) {
-                            MockResponse().setResponseCode(503).setBody("try again: x\n")
-                        } else {
-                            // Answers whatever window was asked for, so a test
-                            // can tell one from another by what comes back.
-                            val q = request.path!!.substringAfter("?").split("&").associate {
-                                it.substringBefore("=") to it.substringAfter("=")
-                            }
-                            val hours = q["hours"]!!.toLong()
-                            val bucket = q["bucket_s"]!!.toInt()
-                            MockResponse().setBody(
-                                """{"controller": 0, "channel": 0, "since": ${nowS - hours * 3600},
-                                    "to": $nowS, "bucket_s": $bucket,
-                                    "points": [{"ts": ${nowS - 600}, "raw": 9010, "lo": 9000, "hi": 9020, "n": 5},
-                                               {"ts": ${nowS - 300}, "raw": 8990, "n": 4}]}""",
-                            )
-                        }
-                    } else if (request.path?.startsWith("/doses") == true) {
-                        dosesFor(request.path!!)
-                    } else {
-                        MockResponse().setResponseCode(404)
-                    }
-            }
-        }
-
-        /** Two rows without a cursor, one older row behind it with one —
-         * unless dosesPageFull, when the first page is as long as the app
-         * asked for and the second one ends it. */
-        private fun dosesFor(path: String): MockResponse {
-            dosesGate?.takeIf { "before=" in path }?.await(5, TimeUnit.SECONDS)
-            if (failDoses) return MockResponse().setResponseCode(503).setBody("try again: x\n")
-            val now = if (dosesSayNow) "\"now\": $nowS," else ""
-            if (dosesPageFull) {
-                val ids = if ("before=" in path) listOf(1L) else (1..DOSES_LIMIT).map { 1000L - it }
-                val rows = ids.joinToString(",") { id ->
-                    """{"id": $id, "ml": 100, "state": "acked", "flow_ml": 100,
-                         "sent_ts": ${nowS - id}, "acked_ts": ${nowS - id},
-                         "pot": "pot-1", "pot_name": "basil"}"""
-                }
-                return MockResponse().setBody("""{$now "doses": [$rows]}""")
-            }
-            return MockResponse().setBody(
-                if ("before=" in path) {
-                    """{$now "doses": [
-                         {"id": 3, "ml": 50, "state": "acked", "flow_ml": 50,
-                          "sent_ts": ${nowS - 90000}, "acked_ts": ${nowS - 89990},
-                          "pot": "pot-1", "pot_name": "basil"}
-                       ]}"""
-                } else {
-                    """{$now "doses": [
-                         {"id": 7, "ml": 100, "cap_s": 30, "flow_ml": 96,
-                          "state": "acked", "source": "manual",
-                          "sent_ts": ${nowS - 600}, "acked_ts": ${nowS - 590},
-                          "pot": "pot-1", "pot_name": "basil"},
-                         {"id": 6, "ml": 100, "state": "expired",
-                          "sent_ts": ${nowS - 4000}, "pot": null, "pot_name": null}
-                       ]}"""
-                },
-            )
-        }
-
-        fun sent(path: String) = requests.filter { it.path == path }
-
-        fun histories() = requests.filter { it.path?.startsWith("/history") == true }
-
-        fun lookups() = requests.filter { it.path?.startsWith("/species") == true }
-
-        fun strips() = requests.filter { it.path?.startsWith("/photos") == true }
-
-        fun uploads() = requests.filter { it.path?.startsWith("/photo?") == true }
-
-        fun posts() = requests.filter { it.method == "POST" }
-    }
-
-    /** A cache in memory: the file one has its own test, and this keeps the
-     * view model's tests about what it does with a hit, not about disk. */
-    private class FakeCache(var held: CachedGarden? = null) : GardenCache {
-        val writes = CopyOnWriteArrayList<CachedGarden>()
-
-        override fun read(): CachedGarden? = held
-
-        override fun write(cached: CachedGarden) {
-            writes += cached
-            held = cached
-        }
-
-        override fun clear() {
-            held = null
-        }
-    }
-
-    private val main = newSingleThreadContext("main")
-    private val server = MockWebServer()
-    private val butler = Butler()
-    private lateinit var model: GardenViewModel
-
-    @BeforeTest
-    fun start() {
-        Dispatchers.setMain(main)
-        server.dispatcher = butler
-        server.start()
-        model = GardenViewModel(Backend(server.url("/").toString(), token = "s3cret"))
-    }
-
-    @AfterTest
-    fun stop() {
-        server.shutdown()
-        Dispatchers.resetMain()
-        main.close()
-    }
-
-    private fun onMain(block: GardenViewModel.() -> Unit) = runBlocking(Dispatchers.Main) { model.block() }
-
-    private fun <T> onMainGet(block: GardenViewModel.() -> T): T = runBlocking(Dispatchers.Main) { model.block() }
-
-    private fun <T : Any> waitFor(what: String, get: () -> T?): T {
-        val deadline = System.currentTimeMillis() + 5000
-        while (System.currentTimeMillis() < deadline) {
-            get()?.let { return it }
-            Thread.sleep(20)
-        }
-        fail("timed out waiting for $what")
-    }
-
-    private fun settled(): UiState.Ready =
-        waitFor("a settled garden") { (model.state.value as? UiState.Ready)?.takeIf { !it.refreshing } }
-
-    private fun pot(): Screen.Pot = waitFor("a pot form") { model.screen.value as? Screen.Pot }
-
-    private fun ready() {
-        onMain { refresh() }
-        settled()
-    }
-
+class GardenViewModelTest : ButlerTest() {
     @Test
     fun `a refresh asked for mid-fetch runs one more fetch afterwards`() {
         val gate = CountDownLatch(1)
@@ -303,7 +36,7 @@ class GardenViewModelTest {
         butler.photos += "photo-a"
         ready()
         onMain { open("pot-1") }
-        val photos = waitFor("the strip") { pot().photos }
+        val photos = waitFor("the strip") { potForm().photos }
         assertEquals(listOf("photo-a"), photos.map { it.id })
         assertEquals("pot-1", butler.strips().single().path?.substringAfter("pot=")?.substringBefore("&"))
     }
@@ -312,9 +45,9 @@ class GardenViewModelTest {
     fun `a picture goes up and the strip is re-read`() {
         ready()
         onMain { open("pot-1") }
-        waitFor("the first strip") { pot().photos }
+        waitFor("the first strip") { potForm().photos }
         onMain { addPhoto(byteArrayOf(1, 2, 3), 1600, 1200) }
-        val photos = waitFor("the picture") { pot().photos?.takeIf { it.isNotEmpty() } }
+        val photos = waitFor("the picture") { potForm().photos?.takeIf { it.isNotEmpty() } }
         assertEquals(listOf("photo-new"), photos.map { it.id })
         val upload = butler.uploads().single()
         assertEquals(3, upload.bodySize)
@@ -331,12 +64,12 @@ class GardenViewModelTest {
         butler.photoAnswer = MockResponse().setResponseCode(507).setBody("refused: no space left\n")
         ready()
         onMain { open("pot-1") }
-        waitFor("the first strip") { pot().photos }
+        waitFor("the first strip") { potForm().photos }
         onMain { addPhoto(byteArrayOf(1), 800, 600) }
-        val note = waitFor("the refusal") { pot().note }
+        val note = waitFor("the refusal") { potForm().note }
         assertTrue(note.contains("no space left"), note)
         assertEquals(2, butler.strips().size)
-        assertTrue(!pot().uploading)
+        assertTrue(!potForm().uploading)
     }
 
     @Test
@@ -344,7 +77,7 @@ class GardenViewModelTest {
         ready()
         onMain { newPot() }
         onMain { addPhoto(byteArrayOf(1), 800, 600) }
-        assertEquals("save the pot first", waitFor("the refusal") { pot().note })
+        assertEquals("save the pot first", waitFor("the refusal") { potForm().note })
         assertTrue(butler.uploads().isEmpty())
     }
 
@@ -354,13 +87,13 @@ class GardenViewModelTest {
         butler.photos += "photo-b"
         ready()
         onMain { open("pot-1") }
-        waitFor("the strip") { pot().photos?.takeIf { it.size == 2 } }
+        waitFor("the strip") { potForm().photos?.takeIf { it.size == 2 } }
         onMain { viewPhoto("photo-a") }
-        assertEquals("photo-a", pot().viewing)
+        assertEquals("photo-a", potForm().viewing)
         onMain { deletePhoto("photo-a") }
-        val left = waitFor("the shorter strip") { pot().photos?.takeIf { it.size == 1 } }
+        val left = waitFor("the shorter strip") { potForm().photos?.takeIf { it.size == 1 } }
         assertEquals(listOf("photo-b"), left.map { it.id })
-        assertNull(pot().viewing)
+        assertNull(potForm().viewing)
     }
 
     @Test
@@ -368,9 +101,9 @@ class GardenViewModelTest {
         butler.failPhotos = true
         ready()
         onMain { open("pot-1") }
-        val why = waitFor("the reason") { pot().photosWhy }
+        val why = waitFor("the reason") { potForm().photosWhy }
         assertTrue(why.startsWith("pictures:"), why)
-        assertNull(pot().photos)
+        assertNull(potForm().photos)
     }
 
     @Test
@@ -383,17 +116,17 @@ class GardenViewModelTest {
         butler.photoGate = gate
         ready()
         onMain { open("pot-1") }
-        waitFor("pot-1's strip") { pot().photos }
+        waitFor("pot-1's strip") { potForm().photos }
         onMain { addPhoto(byteArrayOf(1), 800, 600) }
         waitFor("the upload") { butler.uploads().firstOrNull() }
         onMain { back() }
         onMain { open("pot-2") }
-        waitFor("pot-2's strip") { pot().photos }
+        waitFor("pot-2's strip") { potForm().photos }
         val before = butler.strips().size
         gate.countDown()
         Thread.sleep(300)
         assertEquals(before, butler.strips().size)
-        assertEquals("pot-2", pot().id)
+        assertEquals("pot-2", potForm().id)
     }
 
     @Test
@@ -420,7 +153,7 @@ class GardenViewModelTest {
             edit("species", "basil")
             lookUpSpecies()
         }
-        val answer = waitFor("the lookup") { pot().lookup }
+        val answer = waitFor("the lookup") { potForm().lookup }
         assertEquals("Ocimum basilicum", answer.accepted)
         assertEquals("basil", butler.lookups().single().path?.substringAfter("q="))
     }
@@ -439,10 +172,10 @@ class GardenViewModelTest {
             edit("species", "basil")
             lookUpSpecies()
         }
-        waitFor("the lookup") { pot().lookup }
+        waitFor("the lookup") { potForm().lookup }
         // The one route by which a species has ever reached the band: a
         // dropdown a human can see and change, not a number in the math.
-        assertEquals("herb", pot().draft["plant_type"])
+        assertEquals("herb", potForm().draft["plant_type"])
     }
 
     @Test
@@ -460,25 +193,25 @@ class GardenViewModelTest {
             edit("species", "basil")
             lookUpSpecies()
         }
-        waitFor("the lookup") { pot().lookup }
-        assertEquals("succulent", pot().draft["plant_type"])
+        waitFor("the lookup") { potForm().lookup }
+        assertEquals("succulent", potForm().draft["plant_type"])
         // It is offered rather than applied, and taking it is a tap.
-        assertEquals("herb", suggestedKind(pot().draft, pot().lookup?.kind))
+        assertEquals("herb", suggestedKind(potForm().draft, potForm().lookup?.kind))
         onMain { useKind("herb") }
-        assertEquals("herb", pot().draft["plant_type"])
+        assertEquals("herb", potForm().draft["plant_type"])
     }
 
     @Test
     fun `one field explains itself at a time`() {
         ready()
         onMain { open("pot-1") }
-        assertNull(pot().explaining)
+        assertNull(potForm().explaining)
         onMain { explain("cooldown_h") }
-        assertEquals("cooldown_h", pot().explaining)
+        assertEquals("cooldown_h", potForm().explaining)
         onMain { explain("mode") }
-        assertEquals("mode", pot().explaining)
+        assertEquals("mode", potForm().explaining)
         onMain { stopExplaining() }
-        assertNull(pot().explaining)
+        assertNull(potForm().explaining)
     }
 
     @Test
@@ -488,7 +221,7 @@ class GardenViewModelTest {
             open("pot-1")
             lookUpSpecies()
         }
-        assertEquals("type a species first", waitFor("the refusal") { pot().lookup }.note)
+        assertEquals("type a species first", waitFor("the refusal") { potForm().lookup }.note)
         assertTrue(butler.lookups().isEmpty())
     }
 
@@ -507,11 +240,11 @@ class GardenViewModelTest {
             edit("species", "tomatoe")
             lookUpSpecies()
         }
-        waitFor("the shortlist") { pot().lookup?.candidates?.firstOrNull() }
+        waitFor("the shortlist") { potForm().lookup?.candidates?.firstOrNull() }
         onMain { pickCandidate("Solanum lycopersicum") }
         // The name lands as a single wire token, and the second question is
         // asked about it rather than about what was typed.
-        assertEquals("Solanum_lycopersicum", waitFor("the filled field") { pot().draft["species"] })
+        assertEquals("Solanum_lycopersicum", waitFor("the filled field") { potForm().draft["species"] })
         waitFor("the second lookup") { butler.lookups().getOrNull(1) }
         // Folded and form-encoded: the backend lowercases and collapses the
         // same way, so this is one cache key with what a person typed.
@@ -543,7 +276,7 @@ class GardenViewModelTest {
         }
         assertEquals(
             "save or discard your target edits first",
-            waitFor("the note") { pot().note },
+            waitFor("the note") { potForm().note },
         )
         assertTrue(butler.posts().none { it.path == "/pot" })
     }
@@ -592,7 +325,7 @@ class GardenViewModelTest {
         assertEquals("id=pot-1 name=genovese", post.body.readUtf8())
         // The pot is still reachable under the id it was renamed through.
         onMain { open("pot-1") }
-        assertEquals("pot-1", pot().id)
+        assertEquals("pot-1", potForm().id)
     }
 
     @Test
@@ -732,7 +465,7 @@ class GardenViewModelTest {
         }
         assertIs<CalState.Air>((model.screen.value as Screen.Calibrate).cal)
         onMain { calEvent(CalEvent.Cancel) }
-        val form = pot()
+        val form = potForm()
         assertEquals("pot-1", form.id)
         assertNull(form.note)
         val intervals = butler.sent("/interval").map { it.body.readUtf8() }
@@ -754,7 +487,7 @@ class GardenViewModelTest {
         assertNull(history.why)
         // Reading the history is not a reason to lose a half-typed edit.
         onMain { back() }
-        val form = pot()
+        val form = potForm()
         assertEquals("pot-1", form.id)
         assertEquals("35", form.draft["target_low_pct"])
     }
@@ -957,15 +690,7 @@ class GardenViewModelTest {
     }
 
     private fun cachedPot(name: String = "basil") =
-        Pot(id = "pot-1", name = name, controller = 0, channel = 0, outlet = 3, doseMl = 100, raw = 9000)
-
-    /** Stamped with the butler it came from, as every real write is: a
-     * cache is opened only by the address that wrote it. */
-    private fun cached(pots: List<Pot>, health: Health, atS: Long) =
-        CachedGarden(pots, health, atS = atS, url = server.url("/").toString())
-
-    private fun withCache(cache: FakeCache): GardenViewModel =
-        GardenViewModel(Backend(server.url("/").toString(), token = "s3cret"), cache = cache)
+        pot(name = name, id = "pot-1", controller = 0, channel = 0, outlet = 3, doseMl = 100, raw = 9000)
 
     @Test
     fun `the cache fills the screen at launch, stamped with its age`() {
@@ -1176,7 +901,7 @@ class GardenViewModelTest {
         onMain { openCache() }
         waitFor("the cached garden") { model.state.value as? UiState.Ready }
         onMain { open("pot-1") }
-        val form = pot()
+        val form = potForm()
 
         onMain { water() }
         val refusedWater = waitFor("the water refusal") {
@@ -1309,7 +1034,7 @@ class GardenViewModelTest {
         gate.countDown()
         waitFor("the refresh after it") { butler.sent("/health").getOrNull(1) }
         settled()
-        assertEquals("busy: cmd=3 state=sent", pot().waterRefused)
+        assertEquals("busy: cmd=3 state=sent", potForm().waterRefused)
         butler.slot = null
         onMain { refresh() }
         waitFor("the line gone") { (model.screen.value as? Screen.Pot)?.takeIf { it.waterRefused == null } }

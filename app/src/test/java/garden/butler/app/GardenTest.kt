@@ -7,47 +7,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private fun pot(
-    name: String,
-    status: String = ALIVE,
-    pct: Int? = null,
-    raw: Long? = null,
-    readTs: Long? = null,
-    id: String = "pot-$name",
-) = Pot(id = id, name = name, status = status, pct = pct, raw = raw, readTs = readTs)
-
-private fun controller(
-    name: Int = 0,
-    lastSeen: Long = 0,
-    nextS: Int? = null,
-    float: Int? = null,
-    pos: String? = null,
-    command: InFlight? = null,
-    latched: Latch? = null,
-    lastRefill: Long? = null,
-    retired: Int = 0,
-    posOkSeen: Long? = null,
-    tankMl: Int? = null,
-    tankSamples: Int? = null,
-    pumpedMl: Int = 0,
-    over: Int = 0,
-    flap: Int = 0,
-) = ControllerHealth(
-    name, lastSeen, nextS, float, pos, command,
-    latched = latched, lastRefill = lastRefill, retired = retired, posOkSeen = posOkSeen,
-    tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over, flap = flap,
-)
-
-private fun dose(
-    state: String = "acked",
-    verdict: String? = null,
-    sentTs: Long? = null,
-    ackedTs: Long? = null,
-    ml: Int? = 100,
-    flowMl: Int? = null,
-    source: String? = null,
-) = LastDose(16, ml, flowMl, state, source, sentTs, ackedTs, verdict)
-
 private val complete =
     Pot(
         name = "basil",
@@ -318,7 +277,7 @@ class GardenTest {
         )
         assertEquals(
             "board 0 · never reported · every 5s (override) · float EMPTY · pos unknown",
-            controllerLine(controller(nextS = 5, float = 0, pos = "unknown"), 1000, 60),
+            controllerLine(controller(lastSeen = 0, nextS = 5, float = 0, pos = "unknown"), 1000, 60),
         )
         assertEquals(
             "board 0 · seen 10s ago · every 30s · float ? · pos ?",
@@ -746,38 +705,38 @@ class GardenTest {
     fun `the dose line covers source, ago, state and meter`() {
         assertEquals(
             "manual dose 100 ml · 40min ago · confirmed, meter 96 ml",
-            doseLine(dose(source = "manual", sentTs = -3000, ackedTs = -1400, flowMl = 96), 1000),
+            doseLine(lastDose(source = "manual", sentTs = -3000, ackedTs = -1400, flowMl = 96), 1000),
         )
-        assertEquals("dose 100 ml · 10s ago · confirmed", doseLine(dose(ackedTs = 990), 1000))
+        assertEquals("dose 100 ml · 10s ago · confirmed", doseLine(lastDose(ackedTs = 990), 1000))
         assertEquals(
             "dose 100 ml · 10s ago · handed over, waiting for the board to confirm",
-            doseLine(dose(state = "sent", sentTs = 990), 1000),
+            doseLine(lastDose(state = "sent", sentTs = 990), 1000),
         )
         assertEquals(
             "dose ? ml · expired, the board never confirmed it",
-            doseLine(dose(state = "expired", ml = null), 1000),
+            doseLine(lastDose(state = "expired", ml = null), 1000),
         )
-        assertFalse("too" in doseLine(dose(ackedTs = 990, verdict = "too_much"), 1000))
+        assertFalse("too" in doseLine(lastDose(ackedTs = 990, verdict = "too_much"), 1000))
     }
 
     @Test
     fun `a verdict is wanted after the soak and within the window`() {
         val acked = 1000L
-        assertFalse(needsVerdict(dose(ackedTs = acked), acked + SOAK_S))
-        assertTrue(needsVerdict(dose(ackedTs = acked), acked + SOAK_S + 1))
-        assertTrue(needsVerdict(dose(ackedTs = acked), acked + VERDICT_WINDOW_S))
-        assertFalse(needsVerdict(dose(ackedTs = acked), acked + VERDICT_WINDOW_S + 1))
+        assertFalse(needsVerdict(lastDose(ackedTs = acked), acked + SOAK_S))
+        assertTrue(needsVerdict(lastDose(ackedTs = acked), acked + SOAK_S + 1))
+        assertTrue(needsVerdict(lastDose(ackedTs = acked), acked + VERDICT_WINDOW_S))
+        assertFalse(needsVerdict(lastDose(ackedTs = acked), acked + VERDICT_WINDOW_S + 1))
     }
 
     @Test
     fun `no verdict wanted without a dose, an ack, a timestamp or once judged`() {
         val nowS = 10_000L
         assertFalse(needsVerdict(null, nowS))
-        assertFalse(needsVerdict(dose(state = "sent", sentTs = 1000), nowS))
-        assertFalse(needsVerdict(dose(state = "expired", sentTs = 1000), nowS))
-        assertFalse(needsVerdict(dose(verdict = "ok", ackedTs = 1000), nowS))
-        assertFalse(needsVerdict(dose(), nowS))
-        assertTrue(needsVerdict(dose(sentTs = 1000), nowS)) // acked without acked_ts
+        assertFalse(needsVerdict(lastDose(state = "sent", sentTs = 1000), nowS))
+        assertFalse(needsVerdict(lastDose(state = "expired", sentTs = 1000), nowS))
+        assertFalse(needsVerdict(lastDose(verdict = "ok", ackedTs = 1000), nowS))
+        assertFalse(needsVerdict(lastDose(), nowS))
+        assertTrue(needsVerdict(lastDose(sentTs = 1000), nowS)) // acked without acked_ts
     }
 
     @Test
@@ -796,7 +755,7 @@ class GardenTest {
 
     @Test
     fun `the row note nags for a verdict and otherwise stays quiet`() {
-        val judged = Pot(name = "basil", lastDose = dose(ackedTs = 1000))
+        val judged = Pot(name = "basil", lastDose = lastDose(ackedTs = 1000))
         assertEquals("dose 2h ago, not judged yet", verdictNudge(judged, 1000 + 2 * 3600))
         assertNull(verdictNudge(judged, 1000 + 60))
         assertNull(verdictNudge(Pot(name = "basil"), 5000))
@@ -804,7 +763,7 @@ class GardenTest {
 
     @Test
     fun `a buried pot is never nagged`() {
-        val off = Pot(name = "basil", status = GRAVEYARD, lastDose = dose(ackedTs = 1000))
+        val off = Pot(name = "basil", status = GRAVEYARD, lastDose = lastDose(ackedTs = 1000))
         assertNull(verdictNudge(off, 1000 + 2 * 3600))
     }
 
