@@ -3,6 +3,7 @@ package garden.butler.app
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -23,11 +24,17 @@ private fun controller(
     pos: String? = null,
     command: InFlight? = null,
     latched: Latch? = null,
+    lastRefill: Long? = null,
     retired: Int = 0,
     posOkSeen: Long? = null,
+    tankMl: Int? = null,
+    tankSamples: Int? = null,
+    pumpedMl: Int = 0,
+    over: Int = 0,
 ) = ControllerHealth(
     name, lastSeen, nextS, float, pos, command,
-    latched = latched, retired = retired, posOkSeen = posOkSeen,
+    latched = latched, lastRefill = lastRefill, retired = retired, posOkSeen = posOkSeen,
+    tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over,
 )
 
 private fun dose(
@@ -51,6 +58,10 @@ private val complete =
         targetLowPct = 30,
         doseMl = 100,
     )
+
+private const val TANK_HINT =
+    "Let the tank run empty twice without topping up, and tap refilled when you fill it " +
+        "to the top, so the butler learns its size."
 
 class GardenTest {
     @Test
@@ -287,6 +298,89 @@ class GardenTest {
     }
 
     @Test
+    fun `the tank part says the size and the counter once known, and learning until then`() {
+        val known = controller(lastSeen = 960, float = 1, pos = "ok", tankMl = 4180, tankSamples = 3, pumpedMl = 1100)
+        assertEquals(
+            "board 0 · seen 40s ago · every 60s · float ok · pos ok · tank ≈4.2 L, 1.1 L pumped",
+            controllerLine(known, 1000, 60),
+        )
+        // Both volumes go through the same helper: a small tank reads in ml.
+        assertTrue(
+            controllerLine(known.copy(tankMl = 850, pumpedMl = 0), 1000, 60)
+                .endsWith(" · tank ≈850 ml, 0 ml pumped"),
+        )
+        assertTrue(
+            controllerLine(controller(lastSeen = 990, tankSamples = 0), 1000, 60)
+                .endsWith(" · tank learning 0/2"),
+        )
+        assertTrue(
+            controllerLine(controller(lastSeen = 990, tankSamples = 1), 1000, 60)
+                .endsWith(" · tank learning 1/2"),
+        )
+    }
+
+    @Test
+    fun `no tank part without tank_samples, nor on a retired row`() {
+        // A 0.18.0 backend sends no tank_samples: "learning 0/2" would nag for a feature it lacks.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok",
+            controllerLine(controller(lastSeen = 990, float = 1, pos = "ok", tankSamples = null), 1000, 60),
+        )
+        // Retired is the last word and a quiet one: no tank, learnt or not.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ? · pos ? · retired",
+            controllerLine(controller(lastSeen = 990, tankSamples = 1, retired = 1), 1000, 60),
+        )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ? · pos ? · retired",
+            controllerLine(
+                controller(lastSeen = 990, tankMl = 4000, tankSamples = 2, pumpedMl = 100, retired = 1),
+                1000, 60,
+            ),
+        )
+    }
+
+    @Test
+    fun `volumes read in millilitres below a litre and in litres to one decimal from it`() {
+        assertEquals("0 ml", mlText(0))
+        assertEquals("850 ml", mlText(850))
+        assertEquals("999 ml", mlText(999))
+        assertEquals("1.0 L", mlText(1000))
+        assertEquals("4.2 L", mlText(4180))
+        // Half rounds up, and the decimal never goes missing on a round litre.
+        assertEquals("4.1 L", mlText(4149))
+        assertEquals("4.2 L", mlText(4150))
+        assertEquals("10.0 L", mlText(10_000))
+    }
+
+    @Test
+    fun `OVER sits after STOPPED's slot, and neither a retired row nor one without tank_samples shows it`() {
+        val over =
+            controller(
+                lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500,
+                over = 1, command = InFlight(17, "water", "sent"), latched = Latch(900, "contra"),
+            )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · tank ≈4.0 L, 4.5 L pumped" +
+                " · cmd 17 sent · STOPPED · OVER",
+            controllerLine(over, 1000, 60),
+        )
+        assertTrue(
+            controllerLine(over.copy(command = null, latched = null), 1000, 60)
+                .endsWith(" pumped · OVER"),
+        )
+        assertFalse("OVER" in controllerLine(over.copy(over = 0), 1000, 60))
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · cmd 17 sent · STOPPED · retired",
+            controllerLine(over.copy(retired = 1), 1000, 60),
+        )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok · cmd 17 sent · STOPPED",
+            controllerLine(over.copy(tankSamples = null), 1000, 60),
+        )
+    }
+
+    @Test
     fun `the controller line appends the command in flight`() {
         val water = controller(lastSeen = 990, command = InFlight(17, "water", "sent"))
         assertTrue(controllerLine(water, 1000, 60).endsWith(" · cmd 17 sent"))
@@ -314,8 +408,44 @@ class GardenTest {
                 "Check the tank, type clear contra on the board, then resume.",
             latchLine(c, 1000),
         )
-        assertEquals("it reset with the pump running", latchReason("resetmid"))
+        // A board that reset mid-pour latched dry, and only `dry off` clears that.
+        assertEquals(
+            "board 0 stopped watering 10min ago: it reset with the pump running. " +
+                "Check the tank, type dry off on the board, then resume.",
+            latchLine(c.copy(latched = Latch(since = 400, reason = "resetmid")), 1000),
+        )
         assertEquals("heap", latchReason("heap"))
+    }
+
+    @Test
+    fun `the latch steps and the Resume dialog name the board's word for the reason`() {
+        assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("contra"))
+        assertEquals("check the tank, type dry off on the board, then resume", latchSteps("resetmid"))
+        // A reason neither map knows gets contra's words, the backend's own
+        // fallback (D12): the 409, the page and this card name the same
+        // word, and `clear heap` is a command the board's console does not have.
+        assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("heap"))
+        assertEquals(latchSteps("contra"), latchSteps("heap"))
+        // The dialog is handed the latch and reads the reason from it: no test
+        // renders the Composable, so the word has to be chosen here, not there.
+        assertEquals(
+            "Only after the tank has been checked and `clear contra` has been typed on the board. " +
+                "The butler will queue water again.",
+            resumeText(Latch(400, "contra")),
+        )
+        assertEquals(
+            "Only after the tank has been checked and `dry off` has been typed on the board. " +
+                "The butler will queue water again.",
+            resumeText(Latch(400, "resetmid")),
+        )
+        // The dialog falls back with the card: contra's word for a reason
+        // neither knows, so the two never send a person to type two things.
+        assertEquals(
+            "Only after the tank has been checked and `clear contra` has been typed on the board. " +
+                "The butler will queue water again.",
+            resumeText(Latch(400, "heap")),
+        )
+        assertEquals(resumeText(Latch(400, "contra")), resumeText(Latch(400, "heap")))
     }
 
     @Test
@@ -332,10 +462,188 @@ class GardenTest {
                 alerts = listOf(RaisedAlert("latch:0", raisedTs = 500)),
             )
         assertEquals(listOf("board 0 stopped watering (8min ago)"), problems(paged, nowS = 1000))
+    }
+
+    @Test
+    fun `an over board is a problem until the backend's own page stands`() {
+        val over =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
         assertEquals(
-            "the float on board 0 never moved across the refill (8min ago)",
+            listOf("board 0 pumped more than its tank holds, float still says full"),
+            problems(Health(ok = true, controllers = listOf(over)), nowS = 1000),
+        )
+        val paged =
+            Health(
+                ok = true,
+                controllers = listOf(over),
+                alerts = listOf(RaisedAlert("over:0", raisedTs = 500)),
+            )
+        assertEquals(
+            listOf("board 0 pumped more than its tank holds (8min ago)"),
+            problems(paged, nowS = 1000),
+        )
+        // A retired board is quiet by choice, over or not.
+        assertEquals(
+            emptyList(),
+            problems(Health(ok = true, controllers = listOf(over.copy(retired = 1))), nowS = 1000),
+        )
+    }
+
+    @Test
+    fun `the over dedup is per board, so one board's page does not hide another's`() {
+        val over =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        val health =
+            Health(
+                ok = true,
+                controllers = listOf(over, over.copy(controller = 1)),
+                alerts = listOf(RaisedAlert("over:0", raisedTs = 500)),
+            )
+        // Board 0 reads from its page; board 1 is over but not paged yet (the
+        // ticker debounces), so its own line stands.
+        assertEquals(
+            listOf(
+                "board 0 pumped more than its tank holds (8min ago)",
+                "board 1 pumped more than its tank holds, float still says full",
+            ),
+            problems(health, nowS = 1000),
+        )
+    }
+
+    @Test
+    fun `the tank alerts become readable lines`() {
+        assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
+        // D7: two causes, two clears. A freed magnet clears the page by itself
+        // (the float word goes back to 1); the board's own float check, once
+        // tripped, resets only on a granted dose. Both ways out are named,
+        // since the phone is where the page is read.
+        assertEquals(
+            "the float on board 0 still says empty after the refill: " +
+                "look at the magnet, or water once from the phone",
+            describeAlert("stale:0"),
+        )
+        assertEquals(
+            "the float on board 0 still says empty after the refill (8min ago): " +
+                "look at the magnet, or water once from the phone",
             describeAlert("stale:0", nowS = 1000, raisedTs = 500),
         )
+        // Never raised in /health by design; rendered anyway rather than echoing the key.
+        assertEquals("board 0 measured its tank", describeAlert("tank:0:1788291874"))
+        assertEquals(
+            "board 0 measured its tank (50s ago)",
+            describeAlert("tank:0:1788291874", nowS = 1000, raisedTs = 950),
+        )
+    }
+
+    @Test
+    fun `the learning hint stands under a board until two samples, never under a retired one`() {
+        assertEquals(TANK_HINT, tankHint(controller(lastSeen = 990, tankSamples = 0)))
+        assertEquals(TANK_HINT, tankHint(controller(lastSeen = 990, tankSamples = 1)))
+        assertNull(tankHint(controller(lastSeen = 990, tankSamples = 2, tankMl = 4000)))
+        assertNull(tankHint(controller(lastSeen = 990, tankSamples = 1, retired = 1)))
+    }
+
+    @Test
+    fun `the hint reads the sample count, not the size, and a backend without one gets none`() {
+        // The count is the gate: a size beside one sample still hints, two
+        // samples without a size do not.
+        assertEquals(TANK_HINT, tankHint(controller(lastSeen = 990, tankSamples = 1, tankMl = 4000)))
+        assertNull(tankHint(controller(lastSeen = 990, tankSamples = 2, tankMl = null)))
+        // A 0.18.0 backend sends no tank_samples: nothing to learn, nothing to nag about.
+        assertNull(tankHint(controller(lastSeen = 990)))
+    }
+
+    @Test
+    fun `the over line names the board and what to do, and a retired row has none`() {
+        val over = controller(lastSeen = 990, float = 1, tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        // Past tense: the page outlives the float word that raised it.
+        assertEquals(
+            "board 0 pumped more than its tank holds while the float said full: " +
+                "check the float, refill to the top, then tap refilled.",
+            overLine(over),
+        )
+        assertNull(overLine(over.copy(over = 0)))
+        assertNull(overLine(over.copy(retired = 1)))
+        // Nothing about the tank from a backend that sends no tank_samples, over or not.
+        assertNull(overLine(over.copy(tankSamples = null)))
+    }
+
+    @Test
+    fun `the counter and OVER read the same with and without a refill, since the origin is the backend's`() {
+        // The counter's origin is the backend's to know: the latest tap that
+        // saw the float, or the float's rise once the tank drained after
+        // that tap and was refilled by someone who forgot to tap, while
+        // last_refill still says the old tap. The app shows the counter it
+        // is sent and gates nothing on the tap, so a row with and without
+        // one reads the same.
+        val rise =
+            controller(
+                lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2,
+                pumpedMl = 4500, over = 1, lastRefill = null,
+            )
+        val tapped = rise.copy(lastRefill = 900)
+        val line = controllerLine(rise, 1000, 60)
+        assertTrue(line.endsWith(" · tank ≈4.0 L, 4.5 L pumped · OVER"))
+        assertEquals(line, controllerLine(tapped, 1000, 60))
+        assertNotNull(overLine(rise))
+        assertEquals(overLine(tapped), overLine(rise))
+        assertEquals(
+            listOf("board 0 pumped more than its tank holds, float still says full"),
+            problems(Health(ok = true, controllers = listOf(rise)), nowS = 1000),
+        )
+        // The over line asks for a tap, so the chip is offered on a row that
+        // never had one.
+        assertTrue(offersChips(rise))
+    }
+
+    @Test
+    fun `OVER stands while the float reads empty or says nothing, since only the tap clears it`() {
+        // The backend's over page is cleared by a tap alone: the float word
+        // dropping to 0 is a contra, a flap or an omitted float= as often as
+        // an empty tank. So the line, the over line and the problem gate on
+        // nothing but `over`, and "float EMPTY" sits beside OVER.
+        val full =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        val empty = full.copy(float = 0)
+        val mute = full.copy(float = null)
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float EMPTY · pos ok · tank ≈4.0 L, 4.5 L pumped · OVER",
+            controllerLine(empty, 1000, 60),
+        )
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ? · pos ok · tank ≈4.0 L, 4.5 L pumped · OVER",
+            controllerLine(mute, 1000, 60),
+        )
+        assertNotNull(overLine(empty))
+        assertEquals(overLine(full), overLine(empty))
+        // The same line under "float ?": one report that omits float= blanks
+        // the row's word, not the backend's memory of it, and the tap
+        // snapshots the board's last real word (D2), so the tap the line asks
+        // for counts there too. A line saying it would count "once the float
+        // is back" called the one clear futile.
+        assertEquals(overLine(full), overLine(mute))
+        assertTrue(overLine(mute)!!.endsWith("then tap refilled."))
+        assertNull(overLine(mute.copy(tankSamples = null)))
+        // Both stand at once: the empty reservoir and the presumed-stuck float.
+        assertEquals(
+            listOf(
+                "reservoir empty on board 0",
+                "board 0 pumped more than its tank holds, float still says full",
+            ),
+            problems(Health(ok = true, controllers = listOf(empty)), nowS = 1000),
+        )
+        assertEquals(
+            listOf("board 0 pumped more than its tank holds, float still says full"),
+            problems(Health(ok = true, controllers = listOf(mute)), nowS = 1000),
+        )
+    }
+
+    @Test
+    fun `over does not gate the water button, mirroring the backend`() {
+        // A human is at the phone, the board's own float check still runs,
+        // and the no-flow abort is beneath both.
+        val pot = complete.copy(id = "p")
+        assertNull(cannotWater(pot, controller(lastSeen = 990, over = 1), 1000, 60, emptySet()))
     }
 
     @Test
@@ -478,6 +786,25 @@ class GardenTest {
         assertEquals(
             listOf("a channel", "the board reporting float=1 and pos=ok (now float ?, pos ?)"),
             learningGaps(complete.copy(channel = null), null),
+        )
+    }
+
+    @Test
+    fun `learning also needs the board not to be over, which the rules skip before anything else`() {
+        val over =
+            controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        assertEquals(
+            listOf("the board's tank not being over: refill to the top and tap refilled"),
+            learningGaps(complete, over),
+        )
+        assertEquals(emptyList(), learningGaps(complete, over.copy(over = 0)))
+        // An over page stands until the tap whatever the float says meanwhile: both gaps show.
+        assertEquals(
+            listOf(
+                "the board reporting float=1 and pos=ok (now float 0, pos ok)",
+                "the board's tank not being over: refill to the top and tap refilled",
+            ),
+            learningGaps(complete, over.copy(float = 0)),
         )
     }
 

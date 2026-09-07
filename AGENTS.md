@@ -63,7 +63,10 @@ is on screen. Nothing is queued to send later.
 - `Backend.kt` — the wire models (`Pot` with its `pot-xxxxxx` id, its nickname, `species` and
   every other pots column, `Proposal`, `LastDose`,
   `Health` with `next_default` and per-controller `command`, `Latch` and the tank fields on
-  `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`)),
+  `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`, and
+  since 2026-09-06 `tank_ml` (null while learning), `tank_samples` (null when the key is
+  absent — a 0.18.0 backend — and the row then says nothing about its tank), `pumped_ml`,
+  `over`)),
   `Json { ignoreUnknownKeys }`, and the one class that touches the network: GETs, `post()` for
   `/pot`, `/approve`, `/verdict`, `/interval` with the `X-Token` header, and `refill()` and
   `resume()` (`POST /refill` and `POST /resume`, body `c=<n>`, both handing back the raw
@@ -73,15 +76,35 @@ is on screen. Nothing is queued to send later.
   again: …"); the app shows it as is. The backend's merged-row checks are the validation.
 - `Garden.kt` — pure lines and splits: `splitGarden` (pots / env / disabled + the health it
   came with), `problems` (raised alerts + app-side silence with `next_default`, a stopped
-  board, and the pos line gated on `pos_ok_seen`), the latch and stale alert descriptions, the
-  controller line with the STOPPED and retired marks on it, `latchLine`/`latchReason` (the
-  board's reason in a person's words) and `LATCH_STEPS` (what to do about a stopped board —
-  check the tank, type clear contra on the board, then resume — said once, because the water
-  button's refusal in `Water.kt` repeats it and used to drop the `clear contra` step, without
-  which a resume re-latches at the next report), proposal and dose lines, `needsVerdict` (a dose acked
+  board, an over board, and the pos line gated on `pos_ok_seen`), the latch, over, stale and
+  tank alert descriptions, the controller line with the tank part (`tank ≈4.2 L, 1.1 L pumped`
+  through `mlText`, or `tank learning 1/2` under two samples) and the STOPPED, OVER and retired
+  marks on it, `tankSamplesShown` (the one gate for the tank part, OVER, the hint and the over
+  line: null without `tank_samples` and on a retired row), `tankHint` (the one sentence that
+  says what the refilled chip means — full to the top — shown while the tank is being learnt,
+  gated on the sample count and not the size) and `overLine`
+  (what to do about a float presumed stuck at full, in the past tense since the page outlives
+  the float word; one line whatever the float says, "float ?" included — a report that omits
+  `float=` blanks the row's word, not the backend's memory of it, and the tap snapshots the
+  last real word (D2), so the tap counts there too; `cannotWater`
+  is not gated on it, mirroring the backend), the stale line (which names both ways out, the
+  magnet and one water from the phone: the page clears on the board's float word going back
+  to 1, which a freed magnet gives by itself, but the board's own float check, once tripped,
+  resets only on a granted dose — D7),
+  `latchLine`/`latchReason` (the board's reason in a person's words), `latchSteps`/`resumeText`
+  (what to do about a stopped board — check the tank, type the board's word, then resume —
+  composed once from `LATCH_CLEARS`, the one map from the reason to the word that clears it:
+  `clear contra` for `contra`, `dry off` for `resetmid`, which latched dry on the firmware, and
+  contra's word for a reason neither knows, the backend's own fallback in `latch_steps` (D12); the
+  card, the Resume dialog and the water button's refusal in `Water.kt` all read it, because the
+  refusal used to drop the middle step, without which a resume re-latches at the next report;
+  `resumeText` takes the `Latch` itself, since no test renders the dialog's Composable and a
+  reason picked there would go unchecked),
+  proposal and dose lines, `needsVerdict` (a dose acked
   between 30 min and 48 h ago with no verdict), `learningGaps` (what the rules need, including
-  the board's `float=1 pos=ok`), `potById` (the key everything navigates by; an empty id is
-  never a key) and `potNamed` (only the two places that have a name and not an id).
+  the board's `float=1 pos=ok` and its tank not being over), `potById` (the key everything navigates
+  by; an empty id is never a key) and `potNamed` (only the two places that have a name and not
+  an id).
 - `PotForm.kt` — the form is one `Map<String,String>` draft diffed against the stored pot:
   `POT_FIELDS` (key, label, keyboard, and the sentence behind the ⓘ — every field has one, since
   seventeen boxes labelled in wire names is a form only its author can fill in), `PLANT_KINDS`

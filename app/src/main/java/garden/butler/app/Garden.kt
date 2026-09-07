@@ -92,6 +92,9 @@ fun problems(health: Health, nowS: Long): List<String> {
                 found += "${boardName(c.controller)} stopped watering: ${latchReason(latch.reason)}"
             }
         }
+        if (c.over == 1 && "over:${c.controller}" !in raised) {
+            found += "${boardName(c.controller)} pumped more than its tank holds, float still says full"
+        }
     }
     return found
 }
@@ -109,10 +112,34 @@ private val LATCH_WORDS =
 
 fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
 
-/** What to do about a stopped board, said once: the card under the board
- * and the water button's refusal must not disagree about the middle step,
- * the one without which a resume re-latches at the board's next report. */
-const val LATCH_STEPS = "check the tank, type clear contra on the board, then resume"
+/** The board's word that clears the latch it holds, by the reason it gave.
+ * `clear contra` clears the contradiction latch only; a board that reset
+ * mid-pour latched dry, which only `dry off` clears. A reason neither map
+ * knows gets contra's word, the backend's own fallback in `latch_steps`
+ * (spec D12: one map in each repo, keyed by the reason, the contra words
+ * for a reason it does not know): the 409, the page and this card must
+ * name the same word, and `clear <reason>` named a command the board's
+ * console does not have — it knows `dry on|off` and the two literal
+ * tokens `clear contra`, nothing else. */
+private val LATCH_CLEARS = mapOf("contra" to "clear contra", "resetmid" to "dry off")
+
+private fun latchClear(reason: String): String =
+    LATCH_CLEARS[reason] ?: LATCH_CLEARS.getValue("contra")
+
+/** What to do about a stopped board, said once: the card under the board,
+ * the Resume dialog and the water button's refusal must not disagree about
+ * the middle step, the one without which a resume re-latches at the board's
+ * next report. */
+fun latchSteps(reason: String): String =
+    "check the tank, type ${latchClear(reason)} on the board, then resume"
+
+/** The Resume dialog's sentence: the first two steps as a condition, with
+ * the board's word marked as the thing to type. Handed the latch, not a
+ * reason: the dialog is the one site no test renders, so the reason is read
+ * here, where it is tested, and the Composable has no word to get wrong. */
+fun resumeText(latch: Latch): String =
+    "Only after the tank has been checked and `${latchClear(latch.reason)}` has been typed " +
+        "on the board. The butler will queue water again."
 
 /** The card under a stopped board: why, since when, and the three things to
  * do — two of which are not in this app. */
@@ -120,7 +147,7 @@ fun latchLine(c: ControllerHealth, nowS: Long): String {
     val latch = c.latched ?: return ""
     val since = if (latch.since in 1..nowS) " ${agoText(latch.since, nowS)}" else ""
     return "${boardName(c.controller)} stopped watering$since: ${latchReason(latch.reason)}. " +
-        LATCH_STEPS.replaceFirstChar { it.uppercase() } + "."
+        latchSteps(latch.reason).replaceFirstChar { it.uppercase() } + "."
 }
 
 fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
@@ -135,7 +162,12 @@ fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
         "float" -> "reservoir empty on ${board(1)}$since"
         "pos" -> "${board(1)} lost its manifold position$since"
         "latch" -> "${board(1)} stopped watering$since"
-        "stale" -> "the float on ${board(1)} never moved across the refill$since"
+        "over" -> "${board(1)} pumped more than its tank holds$since"
+        "stale" ->
+            "the float on ${board(1)} still says empty after the refill$since: " +
+                "look at the magnet, or water once from the phone"
+        // A one-shot the backend keeps out of /health; rendered all the same.
+        "tank" -> "${board(1)} measured its tank$since"
         "sensor" ->
             "sensor ch${parts.getOrElse(2) { "?" }} on ${board(1)} stopped reporting$since"
         "fields" ->
@@ -190,11 +222,31 @@ fun envEntry(pot: Pot): Pair<String, String> {
     return pot.name.removePrefix(ENV_PREFIX) to value
 }
 
+/** How many runs from a refill to empty the butler wants before it trusts
+ * a tank size: the backend's TANK_SAMPLES_TO_ARM. */
+const val TANK_SAMPLES_TO_ARM = 2
+
+/** A volume as a person reads it: millilitres below a litre, litres to one
+ * decimal from there. One helper, so the tank and what left it are never
+ * spelt two ways on the same line. Integer arithmetic on purpose: a locale
+ * with a decimal comma must not make "4,2 L" out of a wire number. */
+fun mlText(ml: Int): String {
+    if (ml < 1000) return "$ml ml"
+    val tenths = (ml + 50) / 100
+    return "${tenths / 10}.${tenths % 10} L"
+}
+
 /** One line per controller on the health list: "board 0 · seen 40s ago ·
- * every 60s · float ok · pos ok", plus the command in flight when there is
- * one, then STOPPED while the butler has stopped watering it and retired
- * when a person has retired it. The number is spelt "board 0" wherever a
- * person reads it: bare, an integer controller reads like a stray digit. */
+ * every 60s · float ok · pos ok · tank ≈4.2 L, 1.1 L pumped" (or "tank
+ * learning 1/2" until it is measured), plus the command in flight when
+ * there is one, then STOPPED while the butler has stopped watering it,
+ * OVER while the backend says so (it pumped more than the tank holds with
+ * the float still saying full, or that page stands: only a tap clears it,
+ * so OVER sits beside "float EMPTY" too), and retired when a person has
+ * retired it. The tank part and OVER only when the row speaks of its tank
+ * (`tankSamplesShown`). The number is
+ * spelt "board 0" wherever a person reads it: bare, an integer controller
+ * reads like a stray digit. */
 fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
     val seen = if (c.lastSeen == 0L) "never reported" else "seen ${agoText(c.lastSeen, nowS)}"
     val every = c.nextS?.let { "every ${it}s (override)" } ?: "every ${defaultNextS}s"
@@ -206,13 +258,61 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
         }
     val pos = c.pos?.let { "pos $it" } ?: "pos ?"
     val parts = mutableListOf(boardName(c.controller), seen, every, float, pos)
+    tankSamplesShown(c)?.let { samples ->
+        parts +=
+            c.tankMl?.let { "tank ≈${mlText(it)}, ${mlText(c.pumpedMl)} pumped" }
+                ?: "tank learning $samples/$TANK_SAMPLES_TO_ARM"
+    }
     c.command?.let { cmd ->
         val kind = if (cmd.kind == "water") "" else " ${cmd.kind}"
         parts += "cmd ${cmd.id}$kind ${cmd.state}"
     }
     if (c.latched != null) parts += "STOPPED"
+    if (overShown(c)) parts += "OVER"
     if (c.retired == 1) parts += "retired"
     return parts.joinToString(" · ")
+}
+
+/** The sample count a row speaks of, or null when the row says nothing about
+ * its tank: no tank part on the line, no OVER, no hint, no over line. Null
+ * without `tank_samples` — a 0.18.0 backend sends none, and "learning 0/2"
+ * would nag for a feature it lacks — and on a retired row: retired is the
+ * last word and a quiet one. */
+fun tankSamplesShown(c: ControllerHealth): Int? = c.tankSamples?.takeIf { c.retired != 1 }
+
+/** Whether the row says OVER: the backend says so and the row speaks of its
+ * tank (`tankSamplesShown`). One gate for the word on the line and the line
+ * under it, so the two cannot drift apart. */
+fun overShown(c: ControllerHealth): Boolean = c.over == 1 && tankSamplesShown(c) != null
+
+/** The line under a board's row while its tank is still being measured, or
+ * null. This is where the refilled chip's meaning lives — the tap means
+ * "full to the top", and the size is what the meter counts between that
+ * and the float going empty — so the chip itself keeps its one word. Gated
+ * on the sample count, not on the size being null: the backend makes those
+ * coincide today, and that is its rule to change. Nothing under a row that
+ * says nothing about its tank (`tankSamplesShown`). */
+fun tankHint(c: ControllerHealth): String? =
+    tankSamplesShown(c)?.takeIf { it < TANK_SAMPLES_TO_ARM }?.let {
+        "Let the tank run empty twice without topping up, and tap refilled when you fill it " +
+            "to the top, so the butler learns its size."
+    }
+
+/** The line under a board the butler presumes stuck at full, or null: what
+ * happened (in the past tense — the page outlives the float word that
+ * raised it) and the three things to do, the last of which is the clear.
+ * One line whatever the float says now: a 0 is a contra, a flap or an
+ * omitted `float=` as often as an empty tank, and the tap is the only
+ * clear. Under "float ?" too: one report that omits `float=` blanks the
+ * row's word, not the backend's memory of it, and the tap snapshots the
+ * board's last real word (D2) — which an over board has, the page having
+ * been raised on a float that said full — so the tap counts there as well.
+ * A line telling that row its tap would count "once the float is back"
+ * called the one action that clears the page futile. */
+fun overLine(c: ControllerHealth): String? {
+    if (!overShown(c)) return null
+    return "${boardName(c.controller)} pumped more than its tank holds while the float said " +
+        "full: check the float, refill to the top, then tap refilled."
 }
 
 fun hasOverride(c: ControllerHealth): Boolean = c.nextS != null
@@ -269,7 +369,8 @@ fun rowNote(pot: Pot, nowS: Long): String? {
 /** What the backend's rules need before learning or auto can do anything,
  * so the mode flip explains itself instead of silently doing nothing. The
  * rules also gate on the board's float and pos, which the firmware does
- * not send yet: that gap names itself rather than being read as "fine". */
+ * not send yet, and skip a board that is over: those gaps name themselves
+ * rather than being read as "fine". */
 fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
     val gaps = mutableListOf<String>()
     if (pot.controller == null) gaps += "a controller"
@@ -282,6 +383,9 @@ fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
         gaps +=
             "the board reporting float=1 and pos=ok (now float ${controller?.float ?: "?"}, " +
                 "pos ${controller?.pos ?: "?"})"
+    }
+    if (controller?.over == 1) {
+        gaps += "the board's tank not being over: refill to the top and tap refilled"
     }
     return gaps
 }

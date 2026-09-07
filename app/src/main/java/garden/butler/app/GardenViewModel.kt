@@ -980,8 +980,8 @@ class GardenViewModel(
         }) { noteOnList.value = it }
     }
 
-    /** The human checked the tank (and typed clear contra on the board):
-     * the butler queues water for this board again. */
+    /** The human checked the tank (and typed the board's clearing word,
+     * `latchSteps`): the butler queues water for this board again. */
     fun resume(controller: Int) {
         staleRefusal()?.let { why ->
             noteOnList.value = why
