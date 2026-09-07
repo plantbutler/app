@@ -1,3 +1,4 @@
+// The one activity: what the view model needs from Android, and the screen switch.
 package garden.butler.app
 
 import android.os.Bundle
@@ -23,10 +24,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme { // stock Material3; theming is a no-go in v1
-                // The cache needs the app's own storage and the settings
-                // need its keystore, which is the only reason this view
-                // model is not the no-argument one.
+            MaterialTheme { // stock Material3; a theme of our own is not in scope
+                // The cache needs the app's own storage and the settings its
+                // keystore, which is the only reason this view model is not
+                // the no-argument one.
                 val cache = FileGardenCache(File(applicationContext.filesDir, "garden.json"))
                 val settings = EncryptedConfigStore(applicationContext)
                 App(viewModel(factory = GardenViewModel.factory(cache, settings)))
@@ -35,11 +36,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Four screens, one `when`: a navigation library would be the pitch's
- * architecture rabbit hole. The pot form owns its own back handling (it
- * has a discard dialog to ask first). The minute refresh lives here, not
- * on the list, so the form's readings tick too; the wizard polls on its
- * own and pauses it. */
+/** One `when` over the screens, in place of a navigation library. The pot
+ * form owns its own back handling: it has a discard dialog to ask first.
+ * The minute refresh lives here, not on the list, so the form's readings
+ * tick too; the wizard polls on its own and pauses it. */
 @Composable
 fun App(model: GardenViewModel) {
     val screen by model.screen.collectAsStateWithLifecycle()
