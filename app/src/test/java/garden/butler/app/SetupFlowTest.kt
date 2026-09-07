@@ -26,9 +26,9 @@ import okhttp3.mockwebserver.RecordedRequest
 
 /** First start, and changing butler afterwards.
  *
- * Two fake butlers on two real sockets, because half of what this pitch is
- * about only exists when there are two: the cache belongs to one of them,
- * and an answer from the old one must never land on the new one's screen.
+ * Two fake butlers on two real sockets: half of what is worth testing here
+ * only exists when there are two — the cache belongs to one of them, and an
+ * answer from the old one must never land on the new one's screen.
  */
 @OptIn(DelicateCoroutinesApi::class, ExperimentalCoroutinesApi::class)
 class SetupFlowTest {
@@ -234,7 +234,6 @@ class SetupFlowTest {
         val screen = waitFor("the refusal") { setup().takeIf { !it.checking && it.why != null } }
         assertTrue(screen.why!!.contains("refused that token"), screen.why!!)
         assertTrue(screen.why!!.contains("The address is right"), screen.why!!)
-        // Nothing stored, and no garden loaded behind the screen.
         assertTrue(settings.writes.isEmpty())
         assertTrue(here.sent("/pots").isEmpty())
     }
@@ -328,8 +327,8 @@ class SetupFlowTest {
 
     @Test
     fun `the old butler's cache is not the new one's garden`() {
-        // The pitch's rabbit hole, from the other end: the cache survived
-        // the repoint somehow — a delete that failed, or a kill in between.
+        // The cache survived the repoint somehow — a delete that failed, or
+        // a kill in between.
         settings.held = ButlerConfig(url(two), "other")
         cache.held =
             CachedGarden(
@@ -363,9 +362,8 @@ class SetupFlowTest {
 
     @Test
     fun `an answer from the old butler never lands on the new one's screen`() {
-        // The rabbit hole about the address no longer being a build
-        // constant, in its sharpest form: a slow /pots issued against the
-        // old address, still in the air when the app is pointed elsewhere.
+        // A slow /pots issued against the old address, still in the air
+        // when the app is pointed elsewhere.
         settings.held = ButlerConfig(url(one), "s3cret")
         val gate = CountDownLatch(1)
         launch()
@@ -392,8 +390,7 @@ class SetupFlowTest {
         // flight — it is what cancels the flights — so nothing can cancel
         // it, and without an attempt counter a five-second probe finishes
         // after a later one and puts the app back on the butler the user
-        // just left. Which is this pitch's own failure, through another
-        // door.
+        // just left.
         settings.held = ButlerConfig(url(two), "other")
         launch()
         plantsBecome(listOf("mint"))
