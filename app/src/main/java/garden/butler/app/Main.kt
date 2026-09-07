@@ -58,7 +58,7 @@ fun App(model: GardenViewModel) {
     }
     BackHandler(enabled = calibrating) { model.calEvent(CalEvent.Cancel) }
     when (val it = screen) {
-        Screen.List -> GardenScreen(model)
+        Screen.Garden -> GardenScreen(model)
         is Screen.Pot -> PotScreen(model, it)
         is Screen.Calibrate -> CalibrateScreen(model, it)
         is Screen.Doses -> DosesScreen(model, it)

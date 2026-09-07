@@ -199,7 +199,7 @@ class SetupFlowTest {
         typeAndSave(one, "s3cret")
         plantsBecome(listOf("basil"))
         assertEquals(ButlerConfig(url(one), "s3cret"), settings.writes.single())
-        assertEquals(Screen.List, model.screen.value)
+        assertEquals(Screen.Garden, model.screen.value)
         assertEquals(1, here.sent("/hello").size)
     }
 
@@ -492,7 +492,7 @@ class SetupFlowTest {
             editSetup(url = url(two), token = "other")
             back()
         }
-        assertEquals(Screen.List, model.screen.value)
+        assertEquals(Screen.Garden, model.screen.value)
         assertEquals(listOf("basil"), plants())
         assertEquals(ButlerConfig(url(one), "s3cret"), settings.held)
         assertEquals(0, cache.cleared)

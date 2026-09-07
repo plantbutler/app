@@ -569,7 +569,7 @@ class GardenViewModelTest {
             edit("target_low_pct", "35")
             save()
         }
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         val post = butler.posts().single()
         assertEquals("/pot", post.path)
         assertEquals("s3cret", post.getHeader("X-Token"))
@@ -586,7 +586,7 @@ class GardenViewModelTest {
             edit("name", "genovese")
             save()
         }
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         val post = butler.posts().single()
         assertEquals("/pot", post.path)
         assertEquals("id=pot-1 name=genovese", post.body.readUtf8())
@@ -618,7 +618,7 @@ class GardenViewModelTest {
             edit("target_low_pct", "35")
             save()
         }
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         // Not refused as a duplicate of itself, and not sent as a rename.
         assertEquals("id=pot-1 target_low_pct=35", butler.posts().single().body.readUtf8())
     }
@@ -640,7 +640,7 @@ class GardenViewModelTest {
         // busy = true for good.
         onMain { edit("name", "yet_another_name") }
         gate.countDown()
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         assertEquals("id=pot-1 name=genovese", butler.posts().single().body.readUtf8())
     }
 
@@ -769,7 +769,7 @@ class GardenViewModelTest {
         assertNull(history.doses?.last()?.potName)
         assertEquals("expired", history.doses?.last()?.state)
         onMain { back() }
-        assertEquals(Screen.List, model.screen.value)
+        assertEquals(Screen.Garden, model.screen.value)
     }
 
     @Test
@@ -789,7 +789,7 @@ class GardenViewModelTest {
         assertEquals(true, model.screen.value is Screen.Pot)
         assertEquals(emptyList(), butler.requests.filter { it.path?.startsWith("/doses") == true })
         gate.countDown()
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
     }
 
     @Test
@@ -961,7 +961,7 @@ class GardenViewModelTest {
 
     /** Stamped with the butler it came from, as every real write is: a
      * cache is opened only by the address that wrote it. */
-    private fun cached(pots: kotlin.collections.List<Pot>, health: Health, atS: Long) =
+    private fun cached(pots: List<Pot>, health: Health, atS: Long) =
         CachedGarden(pots, health, atS = atS, url = server.url("/").toString())
 
     private fun withCache(cache: FakeCache): GardenViewModel =
@@ -1040,7 +1040,7 @@ class GardenViewModelTest {
         // The form MUST be popped: PotScreen keeps rendering from its own
         // snapshot when the pot vanishes, so staying would leave a working
         // form whose Save posts an id that is gone.
-        assertEquals(Screen.List, model.screen.value)
+        assertEquals(Screen.Garden, model.screen.value)
     }
 
     @Test
