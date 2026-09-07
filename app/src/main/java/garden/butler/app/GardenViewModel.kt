@@ -282,12 +282,8 @@ class GardenViewModel(
                         when (val before = current.value) {
                             // A displayed garden survives a failed refresh:
                             // a busy-database 503 must not blank the screen.
-                            is UiState.Ready ->
-                                before.copy(
-                                    refreshing = false,
-                                    why = why.message ?: why.toString(),
-                                )
-                            else -> UiState.Trouble(why.message ?: why.toString())
+                            is UiState.Ready -> before.copy(refreshing = false, why = why.reason())
+                            else -> UiState.Trouble(why.reason())
                         }
                     }
                 current.value = fresh
@@ -363,7 +359,7 @@ class GardenViewModel(
                     throw why
                 } catch (why: Exception) {
                     ensureActive()
-                    onPot(form) { it.copy(historyWhy = "chart: " + (why.message ?: why.toString())) }
+                    onPot(form) { it.copy(historyWhy = "chart: " + why.reason()) }
                 }
             }
     }
@@ -384,9 +380,7 @@ class GardenViewModel(
                     throw why
                 } catch (why: Exception) {
                     ensureActive()
-                    onPot(form) {
-                        it.copy(photosWhy = "pictures: " + (why.message ?: why.toString()))
-                    }
+                    onPot(form) { it.copy(photosWhy = "pictures: " + why.reason()) }
                 }
             }
     }
@@ -418,7 +412,7 @@ class GardenViewModel(
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (refused: Exception) {
-                    refused.message ?: refused.toString()
+                    refused.reason()
                 }
             onPot(form) { it.copy(uploading = false, note = why) }
             // Whether it landed or not: a POST that timed out client-side
@@ -447,7 +441,7 @@ class GardenViewModel(
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (refused: Exception) {
-                    refused.message ?: refused.toString()
+                    refused.reason()
                 }
             onPot(form) { it.copy(note = note) }
             reloadPhotosOf(form)
@@ -478,6 +472,11 @@ class GardenViewModel(
      * poured whenever the tailnet comes back is a dose nobody asked for
      * then. */
     private fun staleRefusal(): String? = cachedAtS()?.let { staleLine(it, nowS()) }
+
+    /** The board actions the garden list offers all refuse the same way:
+     * nothing goes on the wire from a cached garden, and the reason lands
+     * where the tap was. True once it has been refused. */
+    private fun refusedOnList(): Boolean = staleRefusal()?.also { noteOnList.value = it } != null
 
     /** One dose to the stored pot — never the draft: the backend waters what
      * it has, so an unsaved controller or dose would water the wrong thing.
@@ -513,7 +512,7 @@ class GardenViewModel(
             } catch (why: IOException) {
                 onPot(form) { it.copy(saving = false, waterRefused = NO_ANSWER) }
             } catch (why: Exception) {
-                onPot(form) { it.copy(saving = false, waterRefused = why.message ?: why.toString()) }
+                onPot(form) { it.copy(saving = false, waterRefused = why.reason()) }
             }
             refresh()
         }
@@ -609,7 +608,7 @@ class GardenViewModel(
                     throw why
                 } catch (why: Exception) {
                     "the butler answered, but this phone could not store the address: " +
-                        (why.message ?: why.toString())
+                        why.reason()
                 }
             if (mine != attempt) return@launch
             if (kept != null) {
@@ -725,7 +724,7 @@ class GardenViewModel(
                 } catch (why: Exception) {
                     ensureActive()
                     // The list already up stays up: a failed reload is weather.
-                    onDoses(fresh) { it.copy(loading = false, why = why.message ?: why.toString()) }
+                    onDoses(fresh) { it.copy(loading = false, why = why.reason()) }
                 }
             }
     }
@@ -757,7 +756,7 @@ class GardenViewModel(
                     throw why
                 } catch (why: Exception) {
                     ensureActive()
-                    onDoses(asking) { it.copy(loadingMore = false, why = why.message ?: why.toString()) }
+                    onDoses(asking) { it.copy(loadingMore = false, why = why.reason()) }
                 }
             }
     }
@@ -800,7 +799,7 @@ class GardenViewModel(
             } catch (why: CancellationException) {
                 throw why
             } catch (why: Exception) {
-                onPot(form) { it.copy(saving = false, refused = why.message ?: why.toString()) }
+                onPot(form) { it.copy(saving = false, refused = why.reason()) }
             }
             refresh()
         }
@@ -822,7 +821,7 @@ class GardenViewModel(
             } catch (why: CancellationException) {
                 throw why
             } catch (why: Exception) {
-                noteOnList.value = why.message ?: why.toString()
+                noteOnList.value = why.reason()
             }
             refresh()
         }
@@ -847,7 +846,7 @@ class GardenViewModel(
             } catch (why: CancellationException) {
                 throw why
             } catch (why: Exception) {
-                onPot(form) { it.copy(saving = false, refused = why.message ?: why.toString()) }
+                onPot(form) { it.copy(saving = false, refused = why.reason()) }
             }
             refresh()
         }
@@ -870,7 +869,7 @@ class GardenViewModel(
                 } catch (why: CancellationException) {
                     throw why
                 } catch (why: Exception) {
-                    SpeciesAnswer(query = typed, note = why.message ?: why.toString())
+                    SpeciesAnswer(query = typed, note = why.reason())
                 }
             // The kind fills the dropdown only while it is empty. A form
             // that already says herb is a human's answer and outranks a
@@ -939,10 +938,7 @@ class GardenViewModel(
     }
 
     fun resetInterval(controller: Int) {
-        staleRefusal()?.let { why ->
-            noteOnList.value = why
-            return
-        }
+        if (refusedOnList()) return
         resetIntervalNow(controller)
     }
 
@@ -955,10 +951,7 @@ class GardenViewModel(
     /** The human refilled the tank: the butler records when, and the
      * stuck-float rule has something to measure against. */
     fun refill(controller: Int) {
-        staleRefusal()?.let { why ->
-            noteOnList.value = why
-            return
-        }
+        if (refusedOnList()) return
         act({
             backend.refill(controller)
             "${boardName(controller)}: refill noted"
@@ -968,10 +961,7 @@ class GardenViewModel(
     /** The human checked the tank (and typed the board's clearing word,
      * `latchSteps`): the butler queues water for this board again. */
     fun resume(controller: Int) {
-        staleRefusal()?.let { why ->
-            noteOnList.value = why
-            return
-        }
+        if (refusedOnList()) return
         act({
             backend.resume(controller)
             "${boardName(controller)} waters again"
@@ -1003,7 +993,7 @@ class GardenViewModel(
                 } catch (why: CancellationException) {
                     throw why
                 } catch (why: Exception) {
-                    why.message ?: why.toString()
+                    why.reason()
                 }
             if (refusal != null) onPot(parent) { it.copy(saving = false, note = refusal) }
             refresh()
@@ -1018,7 +1008,7 @@ class GardenViewModel(
             } catch (why: CancellationException) {
                 throw why
             } catch (why: Exception) {
-                return "could not reach the butler: ${why.message ?: why}"
+                return "could not reach the butler: ${why.reason()}"
             }
         current.value = UiState.Ready(splitGarden(pots, health, phoneS()))
         // By id: the fresh fetch is here to catch drift, and a rename is
@@ -1032,7 +1022,7 @@ class GardenViewModel(
         } catch (why: CancellationException) {
             throw why
         } catch (why: Exception) {
-            return "could not speed up $controller: ${why.message ?: why}"
+            return "could not speed up $controller: ${why.reason()}"
         }
         calController = controller
         // A leftover FAST_NEXT_S from a wizard that never restored is not a
@@ -1099,7 +1089,7 @@ class GardenViewModel(
                 } catch (why: CancellationException) {
                     throw why
                 } catch (why: Exception) {
-                    CalEvent.Refused(why.message ?: why.toString())
+                    CalEvent.Refused(why.reason())
                 }
             calEvent(outcome)
             if (outcome is CalEvent.Refused) refresh()
@@ -1124,7 +1114,7 @@ class GardenViewModel(
                 } catch (why: CancellationException) {
                     throw why
                 } catch (why: Exception) {
-                    "the interval restore failed: ${why.message ?: why} — reset it from the list"
+                    "the interval restore failed: ${why.reason()} — reset it from the list"
                 }
             val note =
                 if (done == null) failure else listOfNotNull(CALIBRATION_SAVED_NOTE, failure).joinToString(", and ")
@@ -1144,7 +1134,7 @@ class GardenViewModel(
                 } catch (why: CancellationException) {
                     throw why
                 } catch (why: Exception) {
-                    why.message ?: why.toString()
+                    why.reason()
                 }
             land(text)
             refresh()

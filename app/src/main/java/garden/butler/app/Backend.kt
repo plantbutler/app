@@ -326,6 +326,12 @@ fun parsePhotoAnswer(answer: String): String? =
  * merged-row checks are the validation. */
 class Refused(val code: Int, val text: String) : Exception(text)
 
+/** A failure as the sentence a screen shows: the exception's own message, or
+ * the class name when it has none — an empty line under a button says nothing
+ * at all. Most of what this ever renders is a Refused carrying the backend's
+ * own words. */
+fun Throwable.reason(): String = message ?: toString()
+
 /** `next=120` as POST /interval answers it; null when it is not that. */
 fun parseNextAnswer(answer: String): Int? =
     answer.trim().removePrefix("next=").takeIf { it != answer.trim() }?.toIntOrNull()
@@ -391,7 +397,7 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
             // is still enough to act on if they did not.
             Probe.NotTheButler("that address or token has a character this app cannot send")
         } catch (why: IOException) {
-            Probe.NoAnswer(why.message ?: why.toString())
+            Probe.NoAnswer(why.reason())
         }
 
     /** The token rides on reads too. Most do not need it — the backend
