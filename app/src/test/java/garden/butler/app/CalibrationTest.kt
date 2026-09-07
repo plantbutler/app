@@ -23,14 +23,7 @@ private fun saving() = CalState.Saving(prevNextS = null, freshS = FRESH_FAST_S, 
 
 private fun stalled() = CalState.Stalled(prevNextS = null, lastReadTs = 990, timeoutS = 150)
 
-private fun pot(
-    controller: Int? = 0,
-    channel: Int? = 0,
-    mode: String = "manual",
-) = Pot(name = "basil", controller = controller, channel = channel, mode = mode)
-
-private fun health(lastSeen: Long = 990, nextS: Int? = null) =
-    ControllerHealth(0, lastSeen = lastSeen, nextS = nextS)
+private val mapped = pot(controller = 0, channel = 0)
 
 class CalibrationTest {
     @Test
@@ -376,36 +369,36 @@ class CalibrationTest {
     fun `calibration is refused for the right reason in priority order`() {
         assertEquals(
             "map a controller and a channel first",
-            canCalibrate(pot(controller = null, mode = "auto"), null, 1000, 60),
+            canCalibrate(mapped.copy(controller = null, mode = "auto"), null, 1000, 60),
         )
         assertEquals(
             "map a controller and a channel first",
-            canCalibrate(pot(channel = null), health(), 1000, 60),
+            canCalibrate(mapped.copy(channel = null), controller(), 1000, 60),
         )
         assertEquals(
             "set the pot to manual first — the rules would water a sensor held in the air",
-            canCalibrate(pot(mode = "learning"), null, 1000, 60),
+            canCalibrate(mapped.copy(mode = "learning"), null, 1000, 60),
         )
-        assertEquals("board 0 has never reported", canCalibrate(pot(), null, 1000, 60))
-        assertEquals("board 0 has never reported", canCalibrate(pot(), health(lastSeen = 0), 1000, 60))
+        assertEquals("board 0 has never reported", canCalibrate(mapped, null, 1000, 60))
+        assertEquals("board 0 has never reported", canCalibrate(mapped, controller(lastSeen = 0), 1000, 60))
         assertEquals(
             "board 0 is silent (last reported 11min ago)",
-            canCalibrate(pot(), health(lastSeen = 300), 1000, 60),
+            canCalibrate(mapped, controller(lastSeen = 300), 1000, 60),
         )
     }
 
     @Test
     fun `the silence threshold follows the interval the controller is on`() {
-        assertNull(canCalibrate(pot(), health(lastSeen = 300, nextS = 300), 1000, 60))
-        assertNull(canCalibrate(pot(), health(lastSeen = 300), 1000, 300))
+        assertNull(canCalibrate(mapped, controller(lastSeen = 300, nextS = 300), 1000, 60))
+        assertNull(canCalibrate(mapped, controller(lastSeen = 300), 1000, 300))
         assertEquals(
             "board 0 is silent (last reported 15min ago)",
-            canCalibrate(pot(), health(lastSeen = 50, nextS = 300), 1000, 60),
+            canCalibrate(mapped, controller(lastSeen = 50, nextS = 300), 1000, 60),
         )
     }
 
     @Test
     fun `a manual, mapped, reporting pot may start`() {
-        assertNull(canCalibrate(pot(), health(), 1000, 60))
+        assertNull(canCalibrate(mapped, controller(), 1000, 60))
     }
 }

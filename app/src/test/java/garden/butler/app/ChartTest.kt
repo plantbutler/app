@@ -10,8 +10,6 @@ import kotlin.test.assertTrue
 
 private fun point(ts: Long, raw: Long, n: Int = 1) = HistoryPoint(ts, raw, n = n)
 
-private fun controller(nextS: Int? = null) = ControllerHealth(0, lastSeen = 1000, nextS = nextS)
-
 /** How many buckets a window asks for. A claim about the enum rather than a
  * field on it: nothing the app draws needs the number, only this test. */
 private val ChartWindow.points: Int

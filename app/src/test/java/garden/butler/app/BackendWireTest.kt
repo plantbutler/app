@@ -5,18 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.MockWebServer
 
 /** The HTTP side of Backend against a real socket: headers, bodies, and the
  * backend's refusals arriving verbatim. */
 class BackendWireTest {
-    private fun withServer(block: (MockWebServer, Backend) -> Unit) {
-        MockWebServer().use { server ->
-            server.start()
-            block(server, Backend(server.url("/").toString(), token = "s3cret"))
-        }
-    }
-
     @Test
     fun `postPot sends the token and a plain-text body, answers the name`() =
         withServer { server, backend ->

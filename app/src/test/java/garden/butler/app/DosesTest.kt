@@ -6,20 +6,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private fun dose(
-    id: Long = 1,
-    ml: Int? = 100,
-    flowMl: Int? = null,
-    state: String = "acked",
-    source: String? = "manual",
-    sentTs: Long? = 1000,
-    ackedTs: Long? = 1010,
-    createdTs: Long? = 990,
-    verdict: String? = null,
-    potName: String? = "basil",
-    kind: String = "water",
-) = Dose(id, kind, ml, flowMl, state, source, createdTs, sentTs, ackedTs, verdict, potName)
-
 class DosesTest {
     @Test
     fun `a dose that flowed short is the one the backend would alert on`() {
