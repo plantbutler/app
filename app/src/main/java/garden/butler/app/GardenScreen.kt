@@ -226,9 +226,10 @@ private fun ProblemStrip(problems: List<String>) {
 
 /** One line per controller, with a "refilled" chip — the tap, the human
  * event the tank is measured from and the only thing that clears OVER.
- * The stuck-float rule counts from the later of that tap and the float's
- * own latest rise, so its counter and OVER can stand on a board nobody
- * ever tapped. A leftover interval override (a wizard that could not
+ * The stuck-float rule counts from that tap, or from the float's own rise
+ * once the tank drained after it and was refilled untapped (`pumpedMl`'s
+ * doc in Backend.kt), so the counter can start later than the tap the row
+ * names. A leftover interval override (a wizard that could not
  * restore it) gets its reset here. A retired board offers neither chip.
  * Under the line, while the
  * tank is still being learnt, the one sentence that says what the tap

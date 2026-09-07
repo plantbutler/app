@@ -526,12 +526,13 @@ class GardenTest {
     }
 
     @Test
-    fun `the counter and OVER stand without a refill, since the origin can be the float's rise`() {
-        // A tank run down and refilled by someone who forgot to tap: the
-        // backend restarts the counter at the float's rise, and last_refill
-        // still says the old tap or nothing. The app shows the counter it is
-        // sent and gates nothing on the tap, so a row with and without one
-        // reads the same.
+    fun `the counter and OVER read the same with and without a refill, since the origin is the backend's`() {
+        // The counter's origin is the backend's to know: the latest tap that
+        // saw the float, or the float's rise once the tank drained after
+        // that tap and was refilled by someone who forgot to tap, while
+        // last_refill still says the old tap. The app shows the counter it
+        // is sent and gates nothing on the tap, so a row with and without
+        // one reads the same.
         val rise =
             controller(
                 lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2,

@@ -99,21 +99,31 @@ class BackendTest {
     }
 
     @Test
-    fun `the counter and over count from the origin, which need not be a refill`() {
-        // The float rose (empty, then full) with nobody tapping: the backend
-        // restarts the counter at the rise, and last_refill still names the old
-        // tap or nothing. The app shows what it is sent and derives neither
-        // field from last_refill.
-        val (rise) =
+    fun `the counter and over count from the origin, which is the tap or a rise after a drain`() {
+        // The origin is the backend's: the latest tap that saw the float, or
+        // the float's rise once it went empty after that tap and full again
+        // with nobody tapping. A tap made at empty keeps the tap when the
+        // pour reaches the float (no drop after it); a tank run down and
+        // refilled by someone who forgot to tap restarts the counter at the
+        // rise while last_refill still names the old tap. The app shows what
+        // it is sent and derives neither field from last_refill, not even on
+        // a row without one — which the backend counts nothing from, but
+        // that is its rule to change.
+        val (atEmpty, untapped) =
             parseHealth(
                 """{"ok": true, "controllers": [
-                     {"controller": 0, "last_seen": 5, "float": 1,
+                     {"controller": 0, "last_seen": 5, "float": 1, "last_refill": 110,
+                      "tank_ml": 4000, "tank_samples": 2, "pumped_ml": 300, "over": 0},
+                     {"controller": 1, "last_seen": 5, "float": 1,
                       "tank_ml": 4000, "tank_samples": 2, "pumped_ml": 4500, "over": 1}
                    ]}""",
             ).controllers
-        assertNull(rise.lastRefill)
-        assertEquals(4500, rise.pumpedMl)
-        assertEquals(1, rise.over)
+        assertEquals(110L, atEmpty.lastRefill)
+        assertEquals(300, atEmpty.pumpedMl)
+        assertEquals(0, atEmpty.over)
+        assertNull(untapped.lastRefill)
+        assertEquals(4500, untapped.pumpedMl)
+        assertEquals(1, untapped.over)
     }
 
     @Test
