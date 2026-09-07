@@ -223,7 +223,7 @@ data class InFlight(
 )
 
 /** The butler has stopped watering this board until a person resumes it:
- * when, and the board's own word for why (contra | resetmid). */
+ * when, and the board's own word for why (contra | dry | resetmid). */
 @Serializable
 data class Latch(
     val since: Long = 0,
