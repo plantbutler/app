@@ -11,7 +11,7 @@ class PhotosTest {
         Photo(id = id, ts = ts, bytes = 400_000, species = species, missing = missing)
 
     // ------------------------------------------------------------------ //
-    // Shrinking, which is where the pitch's first rabbit hole lives
+    // Shrinking
 
     @Test
     fun `a twelve megapixel picture is subsampled, not loaded whole`() {
