@@ -125,13 +125,7 @@ fun SetupScreen(model: GardenViewModel, screen: Screen.Setup) {
                     ),
                 modifier = Modifier.fillMaxWidth(),
             )
-            screen.why?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            screen.why?.let { ErrorText(it, MaterialTheme.typography.bodyMedium) }
             Button(
                 onClick = model::saveSetup,
                 enabled = !screen.checking,

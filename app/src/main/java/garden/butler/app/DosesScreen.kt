@@ -13,8 +13,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,11 +50,7 @@ fun DosesScreen(model: GardenViewModel, screen: Screen.Doses) {
         Box(Modifier.padding(padding).fillMaxSize()) {
             val doses = screen.doses
             when {
-                doses == null && screen.why != null ->
-                    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("The butler is not answering", style = MaterialTheme.typography.titleMedium)
-                        Text(screen.why, style = MaterialTheme.typography.bodySmall)
-                    }
+                doses == null && screen.why != null -> NotAnswering(screen.why)
                 doses == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 else -> DoseList(screen, doses, model)
             }
@@ -70,21 +64,7 @@ private fun DoseList(screen: Screen.Doses, doses: List<Dose>, model: GardenViewM
     PullToRefreshBox(isRefreshing = screen.loading, onRefresh = model::reloadDoses) {
         LazyColumn(Modifier.fillMaxSize()) {
             screen.why?.let { why ->
-                item {
-                    Card(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            ),
-                    ) {
-                        Text(
-                            "reload failed ($why) — showing the last good read",
-                            Modifier.padding(8.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    }
-                }
+                item { StaleCard("reload failed ($why) — showing the last good read") }
             }
             if (doses.isEmpty()) {
                 item {
@@ -133,13 +113,7 @@ private fun DoseRow(dose: Dose, showPot: Boolean, nowS: Long) {
         overlineContent = if (showPot) ({ Text(doseWho(dose)) }) else null,
         supportingContent = {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                trouble?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                trouble?.let { ErrorText(it) }
                 doseSource(dose)?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
             }
         },

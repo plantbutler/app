@@ -134,13 +134,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            cachedAtS?.let {
-                Text(
-                    staleLine(it, nowS),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.titleSmall,
-                )
-            }
+            cachedAtS?.let { ErrorText(staleLine(it, nowS), MaterialTheme.typography.titleSmall) }
             if (pot != null) Text(potLine(pot, nowS), style = MaterialTheme.typography.headlineSmall)
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
@@ -210,9 +204,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             ) {
                 Text("Save")
             }
-            screen.refused?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
+            screen.refused?.let { ErrorText(it) }
             // The graveyard chip above is the reversible answer; this is not,
             // so it stands apart, below Save, and only for a pot that exists.
             if (screen.id != null) {
@@ -300,7 +292,7 @@ private fun Chart(
     }
     if (history == null) {
         if (why == null) Text("loading the last ${window.label}…", style = MaterialTheme.typography.bodySmall)
-        why?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        why?.let { ErrorText(it) }
         return
     }
     val caption = chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX))
@@ -410,7 +402,7 @@ private fun Chart(
     } else {
         Text(caption, style = MaterialTheme.typography.bodySmall)
     }
-    why?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    why?.let { ErrorText(it) }
 }
 
 /** Waters the stored pot, and says under itself why it cannot, or where the
@@ -438,9 +430,7 @@ private fun WaterRow(screen: Screen.Pot, pot: Pot, reason: String?, model: Garde
             Text(waterLine(it, pot.controller?.toString() ?: "?"), style = MaterialTheme.typography.bodySmall)
         }
         if (reason != null && !ownWords) Text(reason, style = MaterialTheme.typography.bodySmall)
-        screen.waterRefused?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
+        screen.waterRefused?.let { ErrorText(it) }
     }
 }
 
@@ -495,14 +485,12 @@ private fun Form(
         modifier = Modifier.fillMaxWidth(),
     )
     if (collision) {
-        Text(
+        ErrorText(
             if (screen.id == null) {
                 "${tokenize(draft["name"].orEmpty())} already exists — open it from the list"
             } else {
                 "${tokenize(draft["name"].orEmpty())} is another pot's name"
-            },
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall,
+            }
         )
     }
     for (field in POT_FIELDS) {

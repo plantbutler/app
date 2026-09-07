@@ -86,9 +86,7 @@ fun GardenScreen(model: GardenViewModel) {
 
 @Composable
 private fun Trouble(state: UiState.Trouble, retry: () -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("The butler is not answering", style = MaterialTheme.typography.titleMedium)
-        Text(state.why, style = MaterialTheme.typography.bodySmall)
+    NotAnswering(state.why, modifier) {
         if (state.retrying) {
             CircularProgressIndicator(Modifier.padding(top = 12.dp).size(28.dp))
         } else {
@@ -117,7 +115,7 @@ private fun GardenList(
             if (cachedAtS != null) {
                 item { CachedBanner(staleLine(cachedAtS, nowS)) }
             } else if (why != null) {
-                item { StaleBanner(why) }
+                item { StaleCard("refresh failed ($why) — showing the last good read") }
             }
             if (garden.problems.isNotEmpty()) {
                 item { ProblemStrip(garden.problems) }
@@ -188,24 +186,6 @@ private fun CachedBanner(line: String) {
     }
 }
 
-/** A refresh failed but the last good read is still on screen: say both. */
-@Composable
-private fun StaleBanner(why: String) {
-    Card(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-    ) {
-        Text(
-            "refresh failed ($why) — showing the last good read",
-            Modifier.padding(8.dp),
-            style = MaterialTheme.typography.labelSmall,
-        )
-    }
-}
-
 /** Visible only when something is wrong; a healthy garden shows no strip. */
 @Composable
 private fun ProblemStrip(problems: List<String>) {
@@ -260,20 +240,10 @@ private fun ControllersCard(
                     }
                 }
                 tankHint(c)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                overLine(c)?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                overLine(c)?.let { ErrorText(it) }
                 c.latched?.let {
                     var asking by remember(c.controller) { mutableStateOf(false) }
-                    Text(
-                        latchLine(c, nowS),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    ErrorText(latchLine(c, nowS))
                     TextButton(onClick = { asking = true }, enabled = live) { Text("Resume watering") }
                     if (asking) {
                         AlertDialog(
@@ -304,13 +274,7 @@ private fun EnvCard(env: List<Pot>, nowS: Long, open: (String) -> Unit) {
                 Column(Modifier.clickable { open(pot.id) }) {
                     Text(label, style = MaterialTheme.typography.labelSmall)
                     Text(value, style = MaterialTheme.typography.titleMedium)
-                    envStale(pot, nowS)?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    envStale(pot, nowS)?.let { ErrorText(it, MaterialTheme.typography.labelSmall) }
                 }
             }
         }

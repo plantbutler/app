@@ -135,11 +135,7 @@ fun PhotoStrip(screen: Screen.Pot, pot: Pot?, model: GardenViewModel) {
                 }
             }
             (unreadable ?: screen.photosWhy)?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+                ErrorText(it, MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -166,11 +162,7 @@ private fun Thumb(photo: Photo, nowS: Long, model: GardenViewModel, open: () -> 
             contentAlignment = Alignment.Center,
         ) {
             if (photo.missing) {
-                Text(
-                    "gone",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+                ErrorText("gone", MaterialTheme.typography.labelSmall)
             } else {
                 Picture(photo.id, model, Modifier.size(THUMB))
             }

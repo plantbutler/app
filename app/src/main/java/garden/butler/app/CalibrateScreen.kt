@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -115,7 +116,7 @@ private fun Body(cal: CalState, controller: String, nowS: Long, send: (CalEvent)
             Text("dry ${cal.dry} · wet ${cal.wet}", style = MaterialTheme.typography.titleLarge)
             calHint(cal.dry, cal.wet)?.let { Centered(it) }
             cal.refused?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                ErrorText(it, LocalTextStyle.current, TextAlign.Center)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { send(CalEvent.Save) }) { Text("Save") }
