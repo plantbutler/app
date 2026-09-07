@@ -59,7 +59,7 @@ class BackendTest {
     }
 
     @Test
-    fun `health carries the tank fields, and a 0_17 backend leaves them defaulted`() {
+    fun `health carries the tank fields, and a 0_18_0 backend leaves them defaulted`() {
         val health =
             parseHealth(
                 """{"ok": true, "controllers": [

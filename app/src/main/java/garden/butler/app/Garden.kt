@@ -242,7 +242,7 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
         parts += "cmd ${cmd.id}$kind ${cmd.state}"
     }
     if (c.latched != null) parts += "STOPPED"
-    if (c.over == 1 && tankSamplesShown(c) != null) parts += "OVER"
+    if (overShown(c)) parts += "OVER"
     if (c.retired == 1) parts += "retired"
     return parts.joinToString(" · ")
 }
@@ -253,6 +253,11 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
  * would nag for a feature it lacks — and on a retired row: retired is the
  * last word and a quiet one. */
 fun tankSamplesShown(c: ControllerHealth): Int? = c.tankSamples?.takeIf { c.retired != 1 }
+
+/** Whether the row says OVER: the backend says so and the row speaks of its
+ * tank (`tankSamplesShown`). One gate for the word on the line and the line
+ * under it, so the two cannot drift apart. */
+fun overShown(c: ControllerHealth): Boolean = c.over == 1 && tankSamplesShown(c) != null
 
 /** The line under a board's row while its tank is still being measured, or
  * null. This is where the refilled chip's meaning lives — the tap means
@@ -272,7 +277,7 @@ fun tankHint(c: ControllerHealth): String? =
  * gated on the float word: a 0 is a contra, a flap or an omitted `float=`
  * as often as an empty tank, and the tap is the only clear. */
 fun overLine(c: ControllerHealth): String? =
-    if (c.over == 1 && tankSamplesShown(c) != null) {
+    if (overShown(c)) {
         "${boardName(c.controller)} pumped more than its tank holds and the float still says " +
             "full: check the float, refill, then tap refilled."
     } else {
