@@ -106,24 +106,31 @@ class BackendTest {
         // pour reaches the float (no drop after it); a tank run down and
         // refilled by someone who forgot to tap restarts the counter at the
         // rise while last_refill still names the old tap. The app shows what
-        // it is sent and derives neither field from last_refill, not even on
-        // a row without one — which the backend counts nothing from, but
-        // that is its rule to change.
-        val (atEmpty, untapped) =
+        // it is sent and derives neither field from last_refill: the same
+        // old tap sits beside a counter running from it and one restarted
+        // at a rise after it, and a row that never had a tap — which the
+        // backend counts nothing from, but that is its rule to change —
+        // parses no differently.
+        val (atEmpty, untapped, neverTapped) =
             parseHealth(
                 """{"ok": true, "controllers": [
                      {"controller": 0, "last_seen": 5, "float": 1, "last_refill": 110,
                       "tank_ml": 4000, "tank_samples": 2, "pumped_ml": 300, "over": 0},
-                     {"controller": 1, "last_seen": 5, "float": 1,
+                     {"controller": 1, "last_seen": 5, "float": 1, "last_refill": 110,
+                      "tank_ml": 4000, "tank_samples": 2, "pumped_ml": 4500, "over": 1},
+                     {"controller": 2, "last_seen": 5, "float": 1,
                       "tank_ml": 4000, "tank_samples": 2, "pumped_ml": 4500, "over": 1}
                    ]}""",
             ).controllers
         assertEquals(110L, atEmpty.lastRefill)
         assertEquals(300, atEmpty.pumpedMl)
         assertEquals(0, atEmpty.over)
-        assertNull(untapped.lastRefill)
+        assertEquals(110L, untapped.lastRefill)
         assertEquals(4500, untapped.pumpedMl)
         assertEquals(1, untapped.over)
+        assertNull(neverTapped.lastRefill)
+        assertEquals(4500, neverTapped.pumpedMl)
+        assertEquals(1, neverTapped.over)
     }
 
     @Test
