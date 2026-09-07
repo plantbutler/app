@@ -1,3 +1,4 @@
+// Every piece of state the app has, and every action the screens can take.
 package garden.butler.app
 
 import androidx.lifecycle.ViewModel
@@ -31,9 +32,8 @@ sealed interface UiState {
     ) : UiState
 }
 
-/** Where the app is: the list, one pot's form, or the wizard over it. A
- * second flow beside the garden, so a refresh never knocks the user out
- * of a half-edited form. */
+/** Where the app is. A flow of its own beside the garden, so a refresh
+ * never knocks the user out of a half-edited form. */
 sealed interface Screen {
     data object List : Screen
 
@@ -56,9 +56,9 @@ sealed interface Screen {
         /** The water command this form queued, followed until its fate is known. */
         val watering: Issued? = null,
         val waterRefused: String? = null,
-        /** The last species lookup made from this form. It is not stored
-         * anywhere: what the pot keeps is the name in draft["species"], and
-         * the garden carries the cached care beside it afterwards. */
+        /** The last species lookup made from this form. Stored nowhere: the
+         * pot keeps the name in its draft, and the garden carries the
+         * cached care beside it afterwards. */
         val lookup: SpeciesAnswer? = null,
         val lookingUp: Boolean = false,
         /** This pot's photographs, newest first as the wire sends them; the
@@ -87,9 +87,8 @@ sealed interface Screen {
         /** The token is dots until this says otherwise. */
         val show: Boolean = false,
     ) : Screen {
-        /** Never the token. This is a data class in a state flow, and the
-         * generated toString is the shortest path from a secret to a log
-         * line or a crash report. */
+        /** Never the token: a data class's generated toString is the
+         * shortest path from a secret to a log line or a crash report. */
         override fun toString(): String =
             "Setup(url=$url, first=$first, checking=$checking, why=$why)"
     }
@@ -125,7 +124,6 @@ private const val NO_ANSWER =
     "no answer from the butler — it may still have queued the dose; check the controllers card"
 private const val NO_COMMAND_ID = "the butler answered without a command id — check the controllers card"
 
-/** One screen, one state flow, no ceremony (the pitch's own words). */
 class GardenViewModel(
     private val backend: Backend = Backend(BuildConfig.BUTLER_URL, BuildConfig.BUTLER_TOKEN),
     /** How often the pot screen asks after a queued dose; a test shortens it. */
@@ -133,13 +131,12 @@ class GardenViewModel(
     /** The phone's clock in seconds; a test drives it past a wait. */
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
     /** The last good answer on disk, so there is something to look at off
-     * the tailnet. Null means no cache at all — which is what the tests
-     * that predate it get. */
+     * the tailnet. Null means no cache at all, which is what most of the
+     * JVM tests take. */
     private val cache: GardenCache? = null,
     /** Where the butler is, as this device holds it. Null means the address
-     * is whatever `backend` was built with and cannot be changed — which is
-     * what the JVM tests that predate the setup screen get, and what the
-     * app itself was until 2026-09-04. */
+     * is whatever `backend` was built with and cannot be changed, which is
+     * what most of the JVM tests take. */
     private val settings: ConfigStore? = null,
     /** What the setup screen starts filled in with when nothing is stored.
      * A development build bakes them from butler.properties; a build made
@@ -161,13 +158,12 @@ class GardenViewModel(
     private val noteOnList = MutableStateFlow<String?>(null)
     val listNote: StateFlow<String?> = noteOnList
 
-    /** Everything this view model has in the air, as one job it can drop.
-     * Pointing the app at another butler cancels the lot: an answer from
-     * the old address landing on the new one's screen is the same mistake
-     * as keeping its cache, and a slow /pots is exactly the shape that
-     * would do it. A supervisor, like viewModelScope's own job, so one
-     * flight failing does not take its siblings with it; a child of that
-     * job, so clearing the view model still cancels everything. */
+    /** Everything in the air, as one job it can drop. Pointing the app at
+     * another butler cancels the lot: an answer from the old address
+     * landing on the new one's screen is the same mistake as keeping its
+     * cache, and a slow /pots is the shape that would do it. A supervisor,
+     * so one flight failing does not take its siblings with it; a child of
+     * viewModelScope's job, so clearing the view model cancels everything. */
     private var work = SupervisorJob(viewModelScope.coroutineContext[Job])
 
     private fun flight(block: suspend CoroutineScope.() -> Unit): Job =
@@ -185,8 +181,7 @@ class GardenViewModel(
      * cancels the flights — so nothing can cancel it, and it has to know
      * for itself when it has been superseded. Without this a slow first
      * Connect finishes last and moves the app back to the butler the user
-     * just left: the same failure this pitch is about, through another
-     * door. */
+     * just left. */
     private var attempt = 0
 
     init {
@@ -219,14 +214,10 @@ class GardenViewModel(
         flight {
             val cached = withContext(Dispatchers.IO) { store.read() } ?: return@flight
             if (current.value is UiState.Ready) return@flight
-            // Whose plants these are. clear() runs when the app is pointed
-            // somewhere else, but a delete that failed, or a kill in
-            // between, would leave one butler's garden to be shown under
-            // another's name; this is what makes that impossible rather
-            // than unlikely. A file with no address at all is discarded
-            // too: it was written by a build where the address could not
-            // change, and the first thing this build does on top of one is
-            // ask for an address, which may well be a different one.
+            // Whose plants these are. Pointing the app elsewhere clears the
+            // cache, but a delete that failed, or a kill in between, would
+            // leave one butler's garden to be shown under another's name;
+            // this is what makes that impossible rather than unlikely.
             if (cached.url != backend.address) return@flight
             current.value =
                 UiState.Ready(
@@ -273,9 +264,8 @@ class GardenViewModel(
                             // Nothing derived goes to disk: a stored
                             // percentage would be read back through
                             // whatever calibration the pot has when the
-                            // cache is opened, and after a recalibration
-                            // that is a different scale. potLine derives
-                            // it from the cached raw instead.
+                            // cache is opened. potLine derives it from the
+                            // cached raw instead.
                             cache?.write(
                                 CachedGarden(
                                     garden.all().map { it.copy(pct = null) },
@@ -290,8 +280,8 @@ class GardenViewModel(
                         throw why // cancellation is not a backend problem
                     } catch (why: Exception) {
                         when (val before = current.value) {
-                            // A displayed garden survives a failed refresh: a
-                            // busy-database 503 must not blank the sofa view.
+                            // A displayed garden survives a failed refresh:
+                            // a busy-database 503 must not blank the screen.
                             is UiState.Ready ->
                                 before.copy(
                                     refreshing = false,
@@ -484,7 +474,7 @@ class GardenViewModel(
     private fun cachedAtS(): Long? = (current.value as? UiState.Ready)?.cachedAtS
 
     /** Why a write must not go out, or null. Nothing is queued for later:
-     * the pitch is a cache, not offline editing, and a dose queued now and
+     * this is a cache, not offline editing, and a dose queued now and
      * poured whenever the tailnet comes back is a dose nobody asked for
      * then. */
     private fun staleRefusal(): String? = cachedAtS()?.let { staleLine(it, nowS()) }
@@ -580,11 +570,10 @@ class GardenViewModel(
 
     /** Prove the address and the token with a real call, then keep them.
      *
-     * The proof is the point. Nothing here can be validated by looking at
-     * it: an address that parses may have nothing behind it, and a token is
-     * only ever right or wrong to the butler. What comes back is one of
-     * three different mistakes, and the sentence says which — because only
-     * one of them is fixed by retyping the token. */
+     * Nothing here can be validated by looking at it: an address that
+     * parses may have nothing behind it, and a token is only ever right or
+     * wrong to the butler. What comes back is one of three mistakes, and
+     * only one of them is fixed by retyping the token. */
     fun saveSetup() {
         val form = shown.value as? Screen.Setup ?: return
         val store = settings ?: return
@@ -595,9 +584,9 @@ class GardenViewModel(
         onSetup { it.copy(checking = true, why = null) }
         val mine = ++attempt
         // Deliberately not a flight: pointing the app somewhere else cancels
-        // every flight, and this is the coroutine that does the pointing.
-        // Which is exactly why it needs `attempt` of its own — nothing else
-        // can cancel it, so it has to know when it has been superseded.
+        // every flight, and this is the coroutine that does the pointing —
+        // which is why it needs `attempt` of its own, nothing else being
+        // able to cancel it when it is superseded.
         viewModelScope.launch {
             val probe = withContext(Dispatchers.IO) { backend.probe(candidate) }
             if (mine != attempt) return@launch
@@ -692,10 +681,10 @@ class GardenViewModel(
         if (!addressed) return
         val parent = shown.value as? Screen.Pot
         // Not while the form has something on the wire. Back restores this
-        // very snapshot, so leaving mid-save would bring back a form stuck
-        // on saving = true — its Save and Water greyed out for good, since
-        // the outcome lands on whatever form is shown and this one is not.
-        // Worse over the wizard's arming POST: the board would be left
+        // very snapshot, so leaving mid-save brings back a form stuck on
+        // saving = true, its Save and Water greyed out for good: the
+        // outcome lands on the form that is shown, and this one is not.
+        // Worse over the wizard's arming POST, which would leave the board
         // reporting every 5 s with no wizard on screen to restore it.
         if (parent?.saving == true) return
         val screen = Screen.Doses(parent, potId, title)
@@ -913,9 +902,9 @@ class GardenViewModel(
         lookUpSpecies()
     }
 
-    /** Accept the offered band. This is the approval the pitch asks for, so
-     * it is an ordinary pot edit and nothing more: the same POST /pot the
-     * form makes, carrying the two numbers a person just agreed to. */
+    /** Accept the offered band: an ordinary pot edit and nothing more, the
+     * same POST /pot the form makes, carrying two numbers a person has just
+     * agreed to. */
     fun applyAdvice(advice: Advice) {
         val form = shown.value as? Screen.Pot ?: return
         val id = form.id ?: return noteOnPot(form, "save the pot first")
@@ -1180,9 +1169,6 @@ class GardenViewModel(
         shown.update { if (it is Screen.Pot && it.isForm(of)) change(it) else it }
     }
 
-    /** An id identifies a form on its own — a rename must not orphan the
-     * outcome of the save that renamed it. Two create forms have no id, so
-     * only there does the typed name tell them apart. */
     companion object {
         /** The only thing the Android side has to build: everything else
          * about this view model is defaulted, so the JVM tests keep using
@@ -1195,11 +1181,14 @@ class GardenViewModel(
                     // backend is pointed at it (or the setup screen asks)
                     // before anything goes on the wire. A build constant
                     // here would be a request to whatever the APK was built
-                    // against, before the user's own answer was even read.
+                    // against, ahead of the user's own answer.
                     GardenViewModel(Backend(), cache = cache, settings = settings) as T
             }
     }
 
+    /** An id identifies a form on its own — a rename must not orphan the
+     * outcome of the save that renamed it. Two create forms have no id, so
+     * only there does the typed name tell them apart. */
     private fun Screen.Pot.isForm(other: Screen.Pot): Boolean =
         if (id != null) id == other.id else other.id == null && draft["name"] == other.draft["name"]
 }
