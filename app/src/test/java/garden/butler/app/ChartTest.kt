@@ -263,8 +263,8 @@ class ChartWindowTest {
 
     @Test
     fun `the gap that breaks the line scales with the bucket`() {
-        // The rabbit hole: a threshold written for a day's 5-min buckets
-        // would swallow a whole outage inside one hourly bucket.
+        // A threshold sized for a day's 5-min buckets would swallow a whole
+        // outage inside one hourly bucket.
         val board = ControllerHealth(0, nextS = 60)
         assertEquals(600L, chartGapS(ChartWindow.DAY.bucketS, board, 60))
         assertEquals(3600L, chartGapS(ChartWindow.WEEK.bucketS, board, 60))
