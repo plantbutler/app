@@ -31,8 +31,8 @@ class CareTest {
 
     @Test
     fun `a plant the source knows but has no numbers for has no line either`() {
-        // Dracaena trifasciata: resolves, and every growth field null. The
-        // ordinary houseplant answer, and it must not render as an empty row.
+        // A found species with every growth field null is the ordinary
+        // houseplant answer, and must not render as an empty row.
         assertNull(careLine(care()))
     }
 

@@ -40,10 +40,10 @@ class CacheTest {
 
     @Test
     fun `the cached pot carries its own calibration, so the numbers cannot drift`() {
-        // The pitch's rabbit hole: a cached percentage would be re-read
-        // through whatever calibration the pot has when the cache is
-        // opened. Storing whole pots means the raw and the two calibration
-        // points travel together and the derived % is the one it was.
+        // A cached percentage would be re-read through whatever calibration
+        // the pot has when the cache is opened. Storing whole pots keeps the
+        // raw and the two calibration points together, so the derived % is
+        // the one it was.
         val cache = FileGardenCache(tempFile())
         cache.write(CachedGarden(listOf(basil), Health(), atS = 1234))
         val back = cache.read()!!.pots.single()
@@ -51,9 +51,8 @@ class CacheTest {
         assertEquals(4000, back.wetRaw)
         assertEquals(8000, back.raw)
         assertEquals(50, moisturePct(back.raw!!, back.dryRaw, back.wetRaw))
-        // Recalibrated since: the same cached raw now reads differently,
-        // which is the point — nothing derived was stored, so the number
-        // follows whichever calibration it is read through.
+        // Same raw, a different calibration: nothing derived was stored, so
+        // the number follows whichever calibration it is read through.
         assertEquals(100, moisturePct(back.raw!!, 16000, 8000))
         assertEquals(0, moisturePct(back.raw!!, 8000, 4000))
     }

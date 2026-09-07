@@ -11,9 +11,9 @@ import kotlin.test.assertTrue
 class SettingsTest {
     @Test
     fun `an address typed without a scheme gets http, never https`() {
-        // The pitch's rabbit hole: the laptop backend is plain HTTP on a LAN
-        // address and the NAS is plain HTTP on the tailnet, so cleartext has
-        // to keep working and the field cannot insist on https.
+        // The laptop backend is plain HTTP on a LAN address and the NAS is
+        // plain HTTP on the tailnet, so cleartext has to keep working and
+        // the field cannot insist on https.
         assertEquals("http://192.168.1.42:9380", normaliseUrl("192.168.1.42:9380"))
         assertEquals("http://100.64.0.1:9380", normaliseUrl("  100.64.0.1:9380  "))
         assertEquals("http://ciccia:9380", normaliseUrl("ciccia:9380"))
