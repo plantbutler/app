@@ -115,13 +115,16 @@ fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
 /** The board's word that clears the latch it holds, by the reason it gave.
  * `clear contra` clears the contradiction latch only; a board that reset
  * mid-pour latched dry, which only `dry off` clears. A reason neither map
- * knows is echoed as `clear <reason>`, which is the backend's own fallback
- * (`latch_steps` in butler.py): the 409, the page and this card must name
- * the same word, and falling back to contra's sent a person to type the
- * wrong thing for a latch that was not contra. */
+ * knows gets contra's word, the backend's own fallback in `latch_steps`
+ * (spec D12: one map in each repo, keyed by the reason, the contra words
+ * for a reason it does not know): the 409, the page and this card must
+ * name the same word, and `clear <reason>` named a command the board's
+ * console does not have — it knows `dry on|off` and the two literal
+ * tokens `clear contra`, nothing else. */
 private val LATCH_CLEARS = mapOf("contra" to "clear contra", "resetmid" to "dry off")
 
-private fun latchClear(reason: String): String = LATCH_CLEARS[reason] ?: "clear $reason"
+private fun latchClear(reason: String): String =
+    LATCH_CLEARS[reason] ?: LATCH_CLEARS.getValue("contra")
 
 /** What to do about a stopped board, said once: the card under the board,
  * the Resume dialog and the water button's refusal must not disagree about

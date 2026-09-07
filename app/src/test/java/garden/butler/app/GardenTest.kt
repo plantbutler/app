@@ -3,7 +3,6 @@ package garden.butler.app
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -422,11 +421,11 @@ class GardenTest {
     fun `the latch steps and the Resume dialog name the board's word for the reason`() {
         assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("contra"))
         assertEquals("check the tank, type dry off on the board, then resume", latchSteps("resetmid"))
-        // A reason neither map knows is echoed as `clear <reason>`, the
-        // backend's own fallback: the 409 and this card name the same word,
-        // never contra's for a latch that is not contra.
-        assertEquals("check the tank, type clear heap on the board, then resume", latchSteps("heap"))
-        assertNotEquals(latchSteps("contra"), latchSteps("heap"))
+        // A reason neither map knows gets contra's words, the backend's own
+        // fallback (D12): the 409, the page and this card name the same
+        // word, and `clear heap` is a command the board's console does not have.
+        assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("heap"))
+        assertEquals(latchSteps("contra"), latchSteps("heap"))
         // The dialog is handed the latch and reads the reason from it: no test
         // renders the Composable, so the word has to be chosen here, not there.
         assertEquals(
@@ -439,11 +438,14 @@ class GardenTest {
                 "The butler will queue water again.",
             resumeText(Latch(400, "resetmid")),
         )
+        // The dialog falls back with the card: contra's word for a reason
+        // neither knows, so the two never send a person to type two things.
         assertEquals(
-            "Only after the tank has been checked and `clear heap` has been typed on the board. " +
+            "Only after the tank has been checked and `clear contra` has been typed on the board. " +
                 "The butler will queue water again.",
             resumeText(Latch(400, "heap")),
         )
+        assertEquals(resumeText(Latch(400, "contra")), resumeText(Latch(400, "heap")))
     }
 
     @Test

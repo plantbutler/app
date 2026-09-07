@@ -95,7 +95,7 @@ is on screen. Nothing is queued to send later.
   (what to do about a stopped board — check the tank, type the board's word, then resume —
   composed once from `LATCH_CLEARS`, the one map from the reason to the word that clears it:
   `clear contra` for `contra`, `dry off` for `resetmid`, which latched dry on the firmware, and
-  `clear <reason>` for a reason neither knows, the backend's own fallback in `latch_steps`; the
+  contra's word for a reason neither knows, the backend's own fallback in `latch_steps` (D12); the
   card, the Resume dialog and the water button's refusal in `Water.kt` all read it, because the
   refusal used to drop the middle step, without which a resume re-latches at the next report;
   `resumeText` takes the `Latch` itself, since no test renders the dialog's Composable and a
