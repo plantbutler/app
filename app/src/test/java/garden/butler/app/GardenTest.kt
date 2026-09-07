@@ -3,6 +3,7 @@ package garden.butler.app
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -421,8 +422,11 @@ class GardenTest {
     fun `the latch steps and the Resume dialog name the board's word for the reason`() {
         assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("contra"))
         assertEquals("check the tank, type dry off on the board, then resume", latchSteps("resetmid"))
-        // A reason this app does not know gets the contra words, as before.
-        assertEquals(latchSteps("contra"), latchSteps("heap"))
+        // A reason neither map knows is echoed as `clear <reason>`, the
+        // backend's own fallback: the 409 and this card name the same word,
+        // never contra's for a latch that is not contra.
+        assertEquals("check the tank, type clear heap on the board, then resume", latchSteps("heap"))
+        assertNotEquals(latchSteps("contra"), latchSteps("heap"))
         // The dialog is handed the latch and reads the reason from it: no test
         // renders the Composable, so the word has to be chosen here, not there.
         assertEquals(
@@ -435,7 +439,11 @@ class GardenTest {
                 "The butler will queue water again.",
             resumeText(Latch(400, "resetmid")),
         )
-        assertEquals(resumeText(Latch(400, "contra")), resumeText(Latch(400, "heap")))
+        assertEquals(
+            "Only after the tank has been checked and `clear heap` has been typed on the board. " +
+                "The butler will queue water again.",
+            resumeText(Latch(400, "heap")),
+        )
     }
 
     @Test
@@ -606,9 +614,13 @@ class GardenTest {
         )
         assertNotNull(overLine(empty))
         assertEquals(overLine(full), overLine(empty))
-        // A board sending no float= cannot be told to check it, and its tap
-        // counts only once the word is back: the line under OVER says so.
-        assertEquals("board 0 is not sending its float; a tap counts once it does.", overLine(mute))
+        // The same line under "float ?": one report that omits float= blanks
+        // the row's word, not the backend's memory of it, and the tap
+        // snapshots the board's last real word (D2), so the tap the line asks
+        // for counts there too. A line saying it would count "once the float
+        // is back" called the one clear futile.
+        assertEquals(overLine(full), overLine(mute))
+        assertTrue(overLine(mute)!!.endsWith("then tap refilled."))
         assertNull(overLine(mute.copy(tankSamples = null)))
         // Both stand at once: the empty reservoir and the presumed-stuck float.
         assertEquals(

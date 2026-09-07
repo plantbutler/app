@@ -84,7 +84,9 @@ is on screen. Nothing is queued to send later.
   says what the refilled chip means — full to the top — shown while the tank is being learnt,
   gated on the sample count and not the size) and `overLine`
   (what to do about a float presumed stuck at full, in the past tense since the page outlives
-  the float word; a board sending no `float=` is told its tap counts once it does; `cannotWater`
+  the float word; one line whatever the float says, "float ?" included — a report that omits
+  `float=` blanks the row's word, not the backend's memory of it, and the tap snapshots the
+  last real word (D2), so the tap counts there too; `cannotWater`
   is not gated on it, mirroring the backend), the stale line (which names both ways out, the
   magnet and one water from the phone: the page clears on the board's float word going back
   to 1, which a freed magnet gives by itself, but the board's own float check, once tripped,
@@ -92,7 +94,8 @@ is on screen. Nothing is queued to send later.
   `latchLine`/`latchReason` (the board's reason in a person's words), `latchSteps`/`resumeText`
   (what to do about a stopped board — check the tank, type the board's word, then resume —
   composed once from `LATCH_CLEARS`, the one map from the reason to the word that clears it:
-  `clear contra` for `contra`, `dry off` for `resetmid`, which latched dry on the firmware; the
+  `clear contra` for `contra`, `dry off` for `resetmid`, which latched dry on the firmware, and
+  `clear <reason>` for a reason neither knows, the backend's own fallback in `latch_steps`; the
   card, the Resume dialog and the water button's refusal in `Water.kt` all read it, because the
   refusal used to drop the middle step, without which a resume re-latches at the next report;
   `resumeText` takes the `Latch` itself, since no test renders the dialog's Composable and a

@@ -114,12 +114,14 @@ fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
 
 /** The board's word that clears the latch it holds, by the reason it gave.
  * `clear contra` clears the contradiction latch only; a board that reset
- * mid-pour latched dry, which only `dry off` clears. A reason this app
- * does not know gets the contra word, as before. */
+ * mid-pour latched dry, which only `dry off` clears. A reason neither map
+ * knows is echoed as `clear <reason>`, which is the backend's own fallback
+ * (`latch_steps` in butler.py): the 409, the page and this card must name
+ * the same word, and falling back to contra's sent a person to type the
+ * wrong thing for a latch that was not contra. */
 private val LATCH_CLEARS = mapOf("contra" to "clear contra", "resetmid" to "dry off")
 
-private fun latchClear(reason: String): String =
-    LATCH_CLEARS[reason] ?: LATCH_CLEARS.getValue("contra")
+private fun latchClear(reason: String): String = LATCH_CLEARS[reason] ?: "clear $reason"
 
 /** What to do about a stopped board, said once: the card under the board,
  * the Resume dialog and the water button's refusal must not disagree about
@@ -296,19 +298,19 @@ fun tankHint(c: ControllerHealth): String? =
 /** The line under a board the butler presumes stuck at full, or null: what
  * happened (in the past tense — the page outlives the float word that
  * raised it) and the three things to do, the last of which is the clear.
- * Shown whatever the float says now: a 0 is a contra, a flap or an omitted
- * `float=` as often as an empty tank, and the tap is the only clear. A board
- * sending no float word cannot be told to check it, and the backend counts
- * its tap only once the word is back, so that row says so instead. */
-fun overLine(c: ControllerHealth): String? =
-    when {
-        !overShown(c) -> null
-        c.float == null ->
-            "${boardName(c.controller)} is not sending its float; a tap counts once it does."
-        else ->
-            "${boardName(c.controller)} pumped more than its tank holds while the float said " +
-                "full: check the float, refill to the top, then tap refilled."
-    }
+ * One line whatever the float says now: a 0 is a contra, a flap or an
+ * omitted `float=` as often as an empty tank, and the tap is the only
+ * clear. Under "float ?" too: one report that omits `float=` blanks the
+ * row's word, not the backend's memory of it, and the tap snapshots the
+ * board's last real word (D2) — which an over board has, the page having
+ * been raised on a float that said full — so the tap counts there as well.
+ * A line telling that row its tap would count "once the float is back"
+ * called the one action that clears the page futile. */
+fun overLine(c: ControllerHealth): String? {
+    if (!overShown(c)) return null
+    return "${boardName(c.controller)} pumped more than its tank holds while the float said " +
+        "full: check the float, refill to the top, then tap refilled."
+}
 
 fun hasOverride(c: ControllerHealth): Boolean = c.nextS != null
 
