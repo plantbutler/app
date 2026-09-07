@@ -766,7 +766,7 @@ class GardenViewModelTest {
         val history = waitFor("the history") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
         assertEquals("/doses?limit=50", butler.requests.last { it.path?.startsWith("/doses") == true }.path)
         // The dose no window claims is listed, not filtered away.
-        assertNull(history.doses?.last()?.pot)
+        assertNull(history.doses?.last()?.potName)
         assertEquals("expired", history.doses?.last()?.state)
         onMain { back() }
         assertEquals(Screen.List, model.screen.value)

@@ -48,7 +48,7 @@ fun CalibrateScreen(model: GardenViewModel, screen: Screen.Calibrate) {
     // titles this screen, and titles it with the name it now has.
     val pot = screen.parent.id?.let { (state as? UiState.Ready)?.garden?.potById(it) }
     val name = pot?.name ?: screen.parent.original["name"].orEmpty()
-    val controller = pot?.controller?.let { "board $it" } ?: "the board"
+    val controller = pot?.controller?.let { boardName(it) } ?: "the board"
     var nowS by remember { mutableLongStateOf(model.nowS()) }
     val owner = LocalLifecycleOwner.current
     val activity = LocalContext.current as? Activity

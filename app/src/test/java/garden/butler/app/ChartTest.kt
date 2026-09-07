@@ -12,8 +12,13 @@ private fun point(ts: Long, raw: Long, n: Int = 1) = HistoryPoint(ts, raw, n = n
 
 private fun controller(nextS: Int? = null) = ControllerHealth(0, lastSeen = 1000, nextS = nextS)
 
+/** How many buckets a window asks for. A claim about the enum rather than a
+ * field on it: nothing the app draws needs the number, only this test. */
+private val ChartWindow.points: Int
+    get() = hours * 3600 / bucketS
+
 private fun history(bucketS: Int = 300, hours: Long = 24, vararg points: HistoryPoint) =
-    History("pot-1", since = 2_000_000 - hours * 3600, to = 2_000_000, bucketS = bucketS, points = points.toList())
+    History(since = 2_000_000 - hours * 3600, to = 2_000_000, bucketS = bucketS, points = points.toList())
 
 private val zurich = ZoneId.of("Europe/Zurich")
 

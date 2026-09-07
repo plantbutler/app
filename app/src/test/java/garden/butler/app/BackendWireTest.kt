@@ -130,7 +130,7 @@ class BackendWireTest {
             assertEquals("too_little", answer.doses[0].verdict)
             assertEquals("basil", answer.doses[0].potName)
             // The unattributable row decodes as itself, not as a failure.
-            assertNull(answer.doses[1].pot)
+            assertNull(answer.doses[1].potName)
             assertEquals("expired", answer.doses[1].state)
         }
 

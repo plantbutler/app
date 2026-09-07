@@ -105,7 +105,7 @@ private fun GardenList(
     listNote: String?,
     model: GardenViewModel,
 ) {
-    val nowS = System.currentTimeMillis() / 1000
+    val nowS = model.nowS()
     // Long press, not swipe: a swipe fires mid-scroll, and both actions here matter.
     var sheetFor by remember { mutableStateOf<Pot?>(null) }
     sheetFor?.let { RowActions(it, model) { sheetFor = null } }

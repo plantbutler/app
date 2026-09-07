@@ -276,8 +276,7 @@ fun canCalibrate(
         return "set the pot to manual first — the rules would water a sensor held in the air"
     }
     if (controller == null || controller.lastSeen == 0L) return "$c has never reported"
-    val threshold = maxOf(600L, 3L * (controller.nextS ?: defaultNextS))
-    if (nowS - controller.lastSeen > threshold) {
+    if (nowS - controller.lastSeen > silentAfterS(controller.nextS, defaultNextS)) {
         return "$c is silent (last reported ${agoText(controller.lastSeen, nowS)})"
     }
     return null

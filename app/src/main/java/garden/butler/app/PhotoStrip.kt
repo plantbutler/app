@@ -54,7 +54,7 @@ private val THUMB = 104.dp
 fun PhotoStrip(screen: Screen.Pot, pot: Pot?, model: GardenViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val nowS = System.currentTimeMillis() / 1000
+    val nowS = model.nowS()
     // One name, reused: the full-size original is worth nothing once it has
     // been shrunk and sent, so nothing keeps several megabytes on the phone for it.
     val target = remember { cameraFile(context) }

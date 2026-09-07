@@ -74,7 +74,6 @@ class BackendTest {
         val (latched, plain, learning) = health.controllers
         assertEquals(Latch(since = 4, reason = "contra"), latched.latched)
         assertEquals(3L, latched.lastRefill)
-        assertEquals("contra" to 4L, latched.err to latched.errTs)
         assertEquals(0, latched.retired)
         assertEquals(2L, latched.posOkSeen)
         assertEquals(4180, latched.tankMl)
@@ -83,7 +82,6 @@ class BackendTest {
         assertEquals(1, latched.over)
         assertNull(plain.latched)
         assertNull(plain.lastRefill)
-        assertNull(plain.err)
         assertEquals(0, plain.retired)
         assertNull(plain.posOkSeen)
         assertNull(plain.tankMl)
@@ -185,7 +183,7 @@ class BackendTest {
         assertEquals("learning", pot.mode)
         assertEquals(Proposal(17, 100, 10, 1788291000), pot.proposal)
         assertEquals(
-            LastDose(16, 100, 10, 96, "acked", "manual", 1788200000, 1788200100, "too_much"),
+            LastDose(16, 100, 96, "acked", "manual", 1788200000, 1788200100, "too_much"),
             pot.lastDose,
         )
     }
@@ -237,7 +235,6 @@ class BackendTest {
             """.trimIndent()
 
         val history = parseHistory(body)
-        assertEquals("pot-3f9a21", history.pot)
         assertEquals(1788205474, history.since)
         assertEquals(1788291874, history.to)
         assertEquals(300, history.bucketS)
@@ -250,7 +247,6 @@ class BackendTest {
         val history =
             parseHistory("""{"pot": "pot-3f9a21", "since": 1, "to": 2, "bucket_s": 300, "points": []}""")
         assertEquals(emptyList(), history.points)
-        assertEquals("pot-3f9a21", history.pot)
     }
 
     @Test

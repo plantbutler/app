@@ -870,11 +870,7 @@ class GardenViewModel(
                 } catch (why: CancellationException) {
                     throw why
                 } catch (why: Exception) {
-                    SpeciesAnswer(
-                        query = typed,
-                        matched = "unavailable",
-                        note = why.message ?: why.toString(),
-                    )
+                    SpeciesAnswer(query = typed, note = why.message ?: why.toString())
                 }
             // The kind fills the dropdown only while it is empty. A form
             // that already says herb is a human's answer and outranks a

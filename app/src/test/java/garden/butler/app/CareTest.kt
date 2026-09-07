@@ -74,10 +74,10 @@ class CareTest {
 
     @Test
     fun `a renamed plant is worth a button and a matching one is not`() {
-        val renamed = SpeciesAnswer(accepted = "Dracaena trifasciata", matched = "exact")
+        val renamed = SpeciesAnswer(accepted = "Dracaena trifasciata")
         assertEquals("Dracaena trifasciata", betterName(renamed, "Sansevieria_trifasciata"))
-        val same = SpeciesAnswer(accepted = "Ocimum basilicum", matched = "exact")
+        val same = SpeciesAnswer(accepted = "Ocimum basilicum")
         assertNull(betterName(same, "ocimum_basilicum"))
-        assertNull(betterName(SpeciesAnswer(matched = "none"), "zzqq"))
+        assertNull(betterName(SpeciesAnswer(), "zzqq"))
     }
 }

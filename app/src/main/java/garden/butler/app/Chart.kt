@@ -23,10 +23,6 @@ enum class ChartWindow(val hours: Int, val bucketS: Int, val label: String) {
     DAY(24, HISTORY_BUCKET_S, "day"),
     WEEK(24 * 7, 1800, "week"),
     MONTH(24 * 30, 3600, "month"),
-    ;
-
-    val points: Int
-        get() = hours * 3600 / bucketS
 }
 
 data class Sample(val ts: Long, val value: Double)

@@ -33,7 +33,6 @@ data class Proposal(
 data class LastDose(
     val id: Long,
     val ml: Int? = null,
-    @SerialName("cap_s") val capS: Int? = null,
     @SerialName("flow_ml") val flowMl: Int? = null,
     val state: String = "sent",
     val source: String? = null,
@@ -47,7 +46,6 @@ data class LastDose(
  * written by the person who taps Apply and by nobody else. */
 @Serializable
 data class Advice(
-    val kind: String = "target",
     val low: Int,
     val high: Int,
     val why: String = "",
@@ -59,8 +57,6 @@ data class Advice(
 @Serializable
 data class Care(
     val found: Boolean = false,
-    val source: String? = null,
-    val fetched: Long? = null,
     @SerialName("common_name") val commonName: String? = null,
     /** The source's own 0-10 scales. Not percentages, and not ours. */
     val light: Int? = null,
@@ -78,19 +74,15 @@ data class Candidate(
     val name: String,
     val common: String? = null,
     val image: String? = null,
-    val slug: String = "",
 )
 
-/** What GET /species answers. `matched` is exact | fuzzy | common | genus |
- * none | unavailable, `candidates` is the shortlist when no name could be
- * placed, and `note` is the sentence to show: the backend words it, because
- * most of the answers are unhappy and each in its own way. */
+/** What GET /species answers. `candidates` is the shortlist when no name
+ * could be placed, and `note` is the sentence to show: the backend words it,
+ * because most of the answers are unhappy and each in its own way. */
 @Serializable
 data class SpeciesAnswer(
     val query: String = "",
-    val matched: String = "none",
     val accepted: String? = null,
-    val rank: String? = null,
     /** Which of the form's kinds to pre-select, read off the botanical
      * family. A guess, and null far more often than not — an unlisted
      * family means nobody knows, and "not sure" already behaves well. */
@@ -145,7 +137,7 @@ data class Pot(
 )
 
 /** One row of the watering history: what was asked, what the meter
- * counted, how it ended, and whose it was. `pot` is null for a dose no
+ * counted, how it ended, and whose it was. `pot_name` is null for a dose no
  * mapping window claims — handed out on a hose no pot held, or never
  * handed out at all. */
 @Serializable
@@ -153,7 +145,6 @@ data class Dose(
     val id: Long,
     val kind: String = "water",
     val ml: Int? = null,
-    @SerialName("cap_s") val capS: Int? = null,
     @SerialName("flow_ml") val flowMl: Int? = null,
     val state: String = "sent",
     val source: String? = null,
@@ -161,7 +152,6 @@ data class Dose(
     @SerialName("sent_ts") val sentTs: Long? = null,
     @SerialName("acked_ts") val ackedTs: Long? = null,
     val verdict: String? = null,
-    val pot: String? = null,
     @SerialName("pot_name") val potName: String? = null,
 )
 
@@ -185,18 +175,13 @@ data class Photo(
     val id: String,
     val ts: Long = 0,
     val bytes: Long = 0,
-    val w: Int? = null,
-    val h: Int? = null,
     val species: String? = null,
     val missing: Boolean = false,
 )
 
 @Serializable
 data class PhotosAnswer(
-    val pot: String = "",
     val photos: List<Photo> = emptyList(),
-    val more: Boolean = false,
-    val now: Long = 0,
 )
 
 /** A picture's address and the one header it needs. The photo routes are
@@ -240,9 +225,6 @@ data class ControllerHealth(
     val command: InFlight? = null,
     val latched: Latch? = null,
     @SerialName("last_refill") val lastRefill: Long? = null,
-    /** The board's last safety error token, as it sent it. */
-    val err: String? = null,
-    @SerialName("err_ts") val errTs: Long? = null,
     val retired: Int = 0,
     /** When the board last said pos=ok; null for one that never has. */
     @SerialName("pos_ok_seen") val posOkSeen: Long? = null,
@@ -285,7 +267,6 @@ data class RaisedAlert(
 @Serializable
 data class Health(
     val ok: Boolean = false,
-    val readings: Long = 0,
     @SerialName("last_ts") val lastTs: Long? = null,
     /** BUTLER_NEXT_S on the backend; 60 only until a backend that says so. */
     @SerialName("next_default") val nextDefault: Int = 60,
@@ -308,7 +289,6 @@ data class HistoryPoint(
 
 @Serializable
 data class History(
-    val pot: String = "",
     val since: Long = 0,
     /** The server's clock when it answered: the chart's right edge. */
     val to: Long = 0,

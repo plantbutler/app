@@ -197,9 +197,7 @@ class PhotosTest {
                                {"id": "photo-deadbeef", "ts": 1756000000, "bytes": 1,
                                 "missing": true}]}""",
             )
-        assertEquals("pot-1", answer.pot)
         assertEquals(2, answer.photos.size)
-        assertEquals(1600, answer.photos[0].w)
         assertEquals("Ocimum_basilicum", answer.photos[0].species)
         assertTrue(answer.photos[1].missing)
         assertNull(answer.photos[1].species)

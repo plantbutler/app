@@ -46,7 +46,7 @@ private fun dose(
     ml: Int? = 100,
     flowMl: Int? = null,
     source: String? = null,
-) = LastDose(16, ml, 10, flowMl, state, source, sentTs, ackedTs, verdict)
+) = LastDose(16, ml, flowMl, state, source, sentTs, ackedTs, verdict)
 
 private val complete =
     Pot(
