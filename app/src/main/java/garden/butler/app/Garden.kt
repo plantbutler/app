@@ -66,11 +66,19 @@ fun splitGarden(all: List<Pot>, health: Health, nowS: Long): Garden {
  * of truth) plus the instant states worth showing on their own —
  * deduplicated so one empty reservoir is one line. The silent check runs
  * app-side too: the backend's ticker only pages when ntfy is configured,
- * and a dark controller must not render a strip-free "healthy" screen. */
+ * and a dark controller must not render a strip-free "healthy" screen.
+ * A raised `float:<c>` on a board whose float check tripped renders as the
+ * tripped line, not "reservoir empty": the page comes within two reports
+ * and the flap stands until the tap, so the strip would otherwise send
+ * someone to wait for the water line for the life of the flap (A3). */
 fun problems(health: Health, nowS: Long): List<String> {
     val found = mutableListOf<String>()
     val raised = health.alerts.map { it.key }.toSet()
-    health.alerts.mapTo(found) { describeAlert(it.key, nowS, it.raisedTs) }
+    val tripped = health.controllers.filter { it.flap == 1 }.associateBy { "float:${it.controller}" }
+    health.alerts.mapTo(found) { alert ->
+        tripped[alert.key]?.let { trippedLine(it.controller) }
+            ?: describeAlert(alert.key, nowS, alert.raisedTs)
+    }
     for (c in health.controllers) {
         if (c.retired == 1) continue // a retired board is quiet by choice
         val threshold = silentAfterS(c.nextS, health.nextDefault)
@@ -82,7 +90,10 @@ fun problems(health: Health, nowS: Long): List<String> {
             found += "${boardName(c.controller)} last reported ${agoText(c.lastSeen, nowS)}"
         }
         if (c.float == 0 && "float:${c.controller}" !in raised) {
-            found += "reservoir empty on ${boardName(c.controller)}"
+            // The board's own float check tripped: the way out is a tap
+            // after a refill, not a wait for the water line.
+            found +=
+                if (c.flap == 1) trippedLine(c.controller) else "reservoir empty on ${boardName(c.controller)}"
         }
         if (c.pos == "unknown" && c.posOkSeen != null && "pos:${c.controller}" !in raised) {
             found += "${boardName(c.controller)} lost its manifold position"
@@ -103,25 +114,38 @@ fun problems(health: Health, nowS: Long): List<String> {
  * and a bare "0 has gone silent" reads like a truncated sentence. */
 fun boardName(controller: Int): String = "board $controller"
 
-/** The board's own word for why the butler stopped, in a person's words. */
+/** The strip's line for a board whose own float check tripped (ch210): the
+ * board's float= is 0 by the check's doing, and the tap after a refill is
+ * the clear, not the water line. One string for the instant state and for
+ * the backend's page, so the two read alike. */
+private fun trippedLine(controller: Int): String =
+    "${boardName(controller)}'s float check tripped: refill to the top and tap refilled"
+
+/** The board's own word for why the butler stopped, in a person's words.
+ * `dry` is the board's dry level on the wire (ch211), which whoever held
+ * it there set: a reset with a dose in flight, or `dry on` at the console.
+ * `resetmid` is the same reset seen as an edge in `err=`, kept for a board
+ * whose `dry off` was typed before its first post-reset report (A2). */
 private val LATCH_WORDS =
     mapOf(
         "contra" to "the float said full and the meter saw nothing",
+        "dry" to "the board is held dry: a reset with the pump running, or dry on at the console",
         "resetmid" to "it reset with the pump running",
     )
 
 fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
 
 /** The board's word that clears the latch it holds, by the reason it gave.
- * `clear contra` clears the contradiction latch only; a board that reset
- * mid-pour latched dry, which only `dry off` clears. A reason neither map
- * knows gets contra's word, the backend's own fallback in `latch_steps`
- * (spec D12: one map in each repo, keyed by the reason, the contra words
- * for a reason it does not know): the 409, the page and this card must
- * name the same word, and `clear <reason>` named a command the board's
- * console does not have — it knows `dry on|off` and the two literal
- * tokens `clear contra`, nothing else. */
-private val LATCH_CLEARS = mapOf("contra" to "clear contra", "resetmid" to "dry off")
+ * `clear contra` clears the contradiction latch only; the dry level, whether
+ * the wire says it stands (`dry`) or a reset mid-pour set it (`resetmid`),
+ * only `dry off` clears. A reason neither map knows gets contra's word, the
+ * backend's own fallback in `latch_steps` (spec D12: one map in each repo,
+ * keyed by the reason, the contra words for a reason it does not know): the
+ * 409, the page and this card must name the same word, and `clear <reason>`
+ * named a command the board's console does not have — it knows `dry on|off`
+ * and the two literal tokens `clear contra`, nothing else. */
+private val LATCH_CLEARS =
+    mapOf("contra" to "clear contra", "dry" to "dry off", "resetmid" to "dry off")
 
 private fun latchClear(reason: String): String =
     LATCH_CLEARS[reason] ?: LATCH_CLEARS.getValue("contra")
@@ -163,9 +187,9 @@ fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
         "pos" -> "${board(1)} lost its manifold position$since"
         "latch" -> "${board(1)} stopped watering$since"
         "over" -> "${board(1)} pumped more than its tank holds$since"
-        "stale" ->
-            "the float on ${board(1)} still says empty after the refill$since: " +
-                "look at the magnet, or water once from the phone"
+        // The page tells the two causes apart and names each one's clear;
+        // this line carries no tail of its own to disagree with it.
+        "stale" -> "the float on ${board(1)} still says empty after the refill$since"
         // A one-shot the backend keeps out of /health; rendered all the same.
         "tank" -> "${board(1)} measured its tank$since"
         "sensor" ->
@@ -238,22 +262,24 @@ fun mlText(ml: Int): String {
 
 /** One line per controller on the health list: "board 0 · seen 40s ago ·
  * every 60s · float ok · pos ok · tank ≈4.2 L, 1.1 L pumped" (or "tank
- * learning 1/2" until it is measured), plus the command in flight when
+ * learning 1/2" until it is measured; "float check tripped" in place of
+ * "float EMPTY" while the board's flap stands, since the 0 is the check's
+ * doing and the tap is the clear), plus the command in flight when
  * there is one, then STOPPED while the butler has stopped watering it,
  * OVER while the backend says so (it pumped more than the tank holds with
  * the float still saying full, or that page stands: only a tap clears it,
- * so OVER sits beside "float EMPTY" too), and retired when a person has
- * retired it. The tank part and OVER only when the row speaks of its tank
- * (`tankSamplesShown`). The number is
- * spelt "board 0" wherever a person reads it: bare, an integer controller
- * reads like a stray digit. */
+ * so OVER sits beside "float EMPTY" and "float check tripped" too), and
+ * retired when a person has retired it. The tank part and OVER only when
+ * the row speaks of its tank (`tankSamplesShown`). The number is spelt
+ * "board 0" wherever a person reads it: bare, an integer controller reads
+ * like a stray digit. */
 fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
     val seen = if (c.lastSeen == 0L) "never reported" else "seen ${agoText(c.lastSeen, nowS)}"
     val every = c.nextS?.let { "every ${it}s (override)" } ?: "every ${defaultNextS}s"
     val float =
         when (c.float) {
             null -> "float ?"
-            0 -> "float EMPTY"
+            0 -> if (c.flap == 1) "float check tripped" else "float EMPTY"
             else -> "float ok"
         }
     val pos = c.pos?.let { "pos $it" } ?: "pos ?"
@@ -370,7 +396,9 @@ fun rowNote(pot: Pot, nowS: Long): String? {
  * so the mode flip explains itself instead of silently doing nothing. The
  * rules also gate on the board's float and pos, which the firmware does
  * not send yet, and skip a board that is over: those gaps name themselves
- * rather than being read as "fine". */
+ * rather than being read as "fine". While the board's float check stands
+ * tripped the rules take a tap after it in place of float=1 (D3), and the
+ * gap says so: the board cannot say float=1 until a dose is granted. */
 fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
     val gaps = mutableListOf<String>()
     if (pot.controller == null) gaps += "a controller"
@@ -380,8 +408,9 @@ fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
     if (pot.targetLowPct == null) gaps += "a target low %"
     if (pot.doseMl == null) gaps += "a dose"
     if (pot.controller != null && (controller?.float != 1 || controller.pos != "ok")) {
+        val orTap = if (controller?.flap == 1) ", or a tap after its float check tripped" else ""
         gaps +=
-            "the board reporting float=1 and pos=ok (now float ${controller?.float ?: "?"}, " +
+            "the board reporting float=1 and pos=ok$orTap (now float ${controller?.float ?: "?"}, " +
                 "pos ${controller?.pos ?: "?"})"
     }
     if (controller?.over == 1) {

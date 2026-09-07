@@ -66,7 +66,8 @@ is on screen. Nothing is queued to send later.
   `ControllerHealth` (`latched`, `last_refill`, `err`, `err_ts`, `retired`, `pos_ok_seen`, and
   since 2026-09-06 `tank_ml` (null while learning), `tank_samples` (null when the key is
   absent — a 0.18.0 backend — and the row then says nothing about its tank), `pumped_ml`,
-  `over`)),
+  `over`, and since 2026-09-07 `flap` (the board's own float check, `ch210` on the wire, 1
+  while it stands tripped; absent — a backend before 0.20.0 — is 0, never tripped))),
   `Json { ignoreUnknownKeys }`, and the one class that touches the network: GETs, `post()` for
   `/pot`, `/approve`, `/verdict`, `/interval` with the `X-Token` header, and `refill()` and
   `resume()` (`POST /refill` and `POST /resume`, body `c=<n>`, both handing back the raw
@@ -76,9 +77,14 @@ is on screen. Nothing is queued to send later.
   again: …"); the app shows it as is. The backend's merged-row checks are the validation.
 - `Garden.kt` — pure lines and splits: `splitGarden` (pots / env / disabled + the health it
   came with), `problems` (raised alerts + app-side silence with `next_default`, a stopped
-  board, an over board, and the pos line gated on `pos_ok_seen`), the latch, over, stale and
+  board, an over board, a tripped float check in place of the empty reservoir — the tap after
+  a refill is the clear, not the water line — under the same `float:<c>` gate, and the
+  backend's own `float:<c>` page rendered as that same tripped line while the board's `flap`
+  stands, since the page comes within two reports and the flap outlives it (A3 of the latches
+  spec), and the pos line gated on `pos_ok_seen`), the latch, over, stale and
   tank alert descriptions, the controller line with the tank part (`tank ≈4.2 L, 1.1 L pumped`
-  through `mlText`, or `tank learning 1/2` under two samples) and the STOPPED, OVER and retired
+  through `mlText`, or `tank learning 1/2` under two samples, and `float check tripped` in
+  place of `float EMPTY` while `flap` stands) and the STOPPED, OVER and retired
   marks on it, `tankSamplesShown` (the one gate for the tank part, OVER, the hint and the over
   line: null without `tank_samples` and on a retired row), `tankHint` (the one sentence that
   says what the refilled chip means — full to the top — shown while the tank is being learnt,
@@ -87,14 +93,16 @@ is on screen. Nothing is queued to send later.
   the float word; one line whatever the float says, "float ?" included — a report that omits
   `float=` blanks the row's word, not the backend's memory of it, and the tap snapshots the
   last real word (D2), so the tap counts there too; `cannotWater`
-  is not gated on it, mirroring the backend), the stale line (which names both ways out, the
-  magnet and one water from the phone: the page clears on the board's float word going back
-  to 1, which a freed magnet gives by itself, but the board's own float check, once tripped,
-  resets only on a granted dose — D7),
+  is not gated on it, mirroring the backend), the stale line (bare since 2026-09-07: the
+  backend's page tells the two causes apart by `flap` and names each one's clear — a magnet to
+  look at, or a refill and a tap that answers the board's tripped float check — so the line
+  carries no tail of its own to disagree with it; D7 as amended by the latches spec),
   `latchLine`/`latchReason` (the board's reason in a person's words), `latchSteps`/`resumeText`
   (what to do about a stopped board — check the tank, type the board's word, then resume —
   composed once from `LATCH_CLEARS`, the one map from the reason to the word that clears it:
-  `clear contra` for `contra`, `dry off` for `resetmid`, which latched dry on the firmware, and
+  `clear contra` for `contra`, `dry off` for `dry` (the board's dry level on the wire, `ch211`:
+  a reset with a dose in flight, or `dry on` at the console) and for `resetmid` (the same reset
+  seen as an `err=` edge, kept for a `dry off` typed before the first post-reset report), and
   contra's word for a reason neither knows, the backend's own fallback in `latch_steps` (D12); the
   card, the Resume dialog and the water button's refusal in `Water.kt` all read it, because the
   refusal used to drop the middle step, without which a resume re-latches at the next report;
@@ -102,7 +110,8 @@ is on screen. Nothing is queued to send later.
   reason picked there would go unchecked),
   proposal and dose lines, `needsVerdict` (a dose acked
   between 30 min and 48 h ago with no verdict), `learningGaps` (what the rules need, including
-  the board's `float=1 pos=ok` and its tank not being over), `potById` (the key everything navigates
+  the board's `float=1 pos=ok` — or, while its float check stands tripped, a tap after it — and
+  its tank not being over), `potById` (the key everything navigates
   by; an empty id is never a key) and `potNamed` (only the two places that have a name and not
   an id).
 - `PotForm.kt` — the form is one `Map<String,String>` draft diffed against the stored pot:

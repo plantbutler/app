@@ -31,10 +31,11 @@ private fun controller(
     tankSamples: Int? = null,
     pumpedMl: Int = 0,
     over: Int = 0,
+    flap: Int = 0,
 ) = ControllerHealth(
     name, lastSeen, nextS, float, pos, command,
     latched = latched, lastRefill = lastRefill, retired = retired, posOkSeen = posOkSeen,
-    tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over,
+    tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over, flap = flap,
 )
 
 private fun dose(
@@ -217,6 +218,38 @@ class GardenTest {
     }
 
     @Test
+    fun `a tripped float check says the tap is the way out, before and after the backend's page`() {
+        // ch210: the board refused three doses running on its float and
+        // latched, so float= is 0 because of the flap, not the water line.
+        // "reservoir empty" would send someone to fill the tank and wait; the
+        // flap resets only on a granted dose, which the tap after a refill
+        // lets the rules queue (D3). So the line says the tap.
+        val tripped = controller(lastSeen = 990, float = 0, pos = "ok", flap = 1)
+        val line = "board 0's float check tripped: refill to the top and tap refilled"
+        assertEquals(listOf(line), problems(Health(ok = true, controllers = listOf(tripped)), nowS = 1000))
+        // The backend pages float:0 within two reports and the flap stands
+        // until the tap, so the page renders as the same line rather than as
+        // "reservoir empty" for the life of the flap (A3). Still one float,
+        // one line: the raised one, with the instant one gated behind it.
+        val paged =
+            Health(
+                ok = true,
+                controllers = listOf(tripped),
+                alerts = listOf(RaisedAlert("float:0", raisedTs = 950)),
+            )
+        assertEquals(listOf(line), problems(paged, nowS = 1000))
+        // Per board: another board's page for a plain empty tank keeps its
+        // own words beside it.
+        val twoBoards =
+            Health(
+                ok = true,
+                controllers = listOf(tripped, controller(name = 1, lastSeen = 990, float = 0, pos = "ok")),
+                alerts = listOf(RaisedAlert("float:0", raisedTs = 950), RaisedAlert("float:1", raisedTs = 950)),
+            )
+        assertEquals(listOf(line, "reservoir empty on board 1 (50s ago)"), problems(twoBoards, nowS = 1000))
+    }
+
+    @Test
     fun `instant float and pos lines are deduplicated against raised alerts`() {
         val health =
             Health(
@@ -294,6 +327,24 @@ class GardenTest {
         assertEquals(
             "board 0 · seen 10s ago · every 60s · float ok · pos 3",
             controllerLine(controller(lastSeen = 990, float = 1, pos = "3"), 1000, 60),
+        )
+    }
+
+    @Test
+    fun `the controller line says the float check tripped in place of EMPTY while the flap stands`() {
+        // The board's own float check tripped (ch210): float= is 0 because
+        // of it, so the word says why rather than "EMPTY", which reads as a
+        // tank to fill when this is a tank to fill and tap.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float check tripped · pos ok",
+            controllerLine(controller(lastSeen = 990, float = 0, pos = "ok", flap = 1), 1000, 60),
+        )
+        // It stands in for the 0 word only. The board computes float= as
+        // debounced AND !contra AND !flap, so a 1 beside flap=1 is the
+        // board's own word and is shown as sent.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok",
+            controllerLine(controller(lastSeen = 990, float = 1, pos = "ok", flap = 1), 1000, 60),
         )
     }
 
@@ -414,6 +465,14 @@ class GardenTest {
                 "Check the tank, type dry off on the board, then resume.",
             latchLine(c.copy(latched = Latch(since = 400, reason = "resetmid")), 1000),
         )
+        // The board's dry level on the wire (ch211): held dry by a reset
+        // with a dose in flight or by `dry on` at the console, and the one
+        // word that clears it is resetmid's (A2).
+        assertEquals(
+            "board 0 stopped watering 10min ago: the board is held dry: a reset with the pump " +
+                "running, or dry on at the console. Check the tank, type dry off on the board, then resume.",
+            latchLine(c.copy(latched = Latch(since = 400, reason = "dry")), 1000),
+        )
         assertEquals("heap", latchReason("heap"))
     }
 
@@ -421,6 +480,7 @@ class GardenTest {
     fun `the latch steps and the Resume dialog name the board's word for the reason`() {
         assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("contra"))
         assertEquals("check the tank, type dry off on the board, then resume", latchSteps("resetmid"))
+        assertEquals("check the tank, type dry off on the board, then resume", latchSteps("dry"))
         // A reason neither map knows gets contra's words, the backend's own
         // fallback (D12): the 409, the page and this card name the same
         // word, and `clear heap` is a command the board's console does not have.
@@ -438,6 +498,7 @@ class GardenTest {
                 "The butler will queue water again.",
             resumeText(Latch(400, "resetmid")),
         )
+        assertEquals(resumeText(Latch(400, "resetmid")), resumeText(Latch(400, "dry")))
         // The dialog falls back with the card: contra's word for a reason
         // neither knows, so the two never send a person to type two things.
         assertEquals(
@@ -513,18 +574,16 @@ class GardenTest {
     @Test
     fun `the tank alerts become readable lines`() {
         assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
-        // D7: two causes, two clears. A freed magnet clears the page by itself
-        // (the float word goes back to 1); the board's own float check, once
-        // tripped, resets only on a granted dose. Both ways out are named,
-        // since the phone is where the page is read.
+        // D7 as amended by the latches spec: the backend's page tells the two
+        // causes apart (the board's float check tripped, or a magnet to look
+        // at) and names the clear for each, so the strip's line carries no
+        // tail of its own to disagree with it.
         assertEquals(
-            "the float on board 0 still says empty after the refill: " +
-                "look at the magnet, or water once from the phone",
+            "the float on board 0 still says empty after the refill",
             describeAlert("stale:0"),
         )
         assertEquals(
-            "the float on board 0 still says empty after the refill (8min ago): " +
-                "look at the magnet, or water once from the phone",
+            "the float on board 0 still says empty after the refill (8min ago)",
             describeAlert("stale:0", nowS = 1000, raisedTs = 500),
         )
         // Never raised in /health by design; rendered anyway rather than echoing the key.
@@ -786,6 +845,26 @@ class GardenTest {
         assertEquals(
             listOf("a channel", "the board reporting float=1 and pos=ok (now float ?, pos ?)"),
             learningGaps(complete.copy(channel = null), null),
+        )
+    }
+
+    @Test
+    fun `learning under a tripped float check names the tap as the other way in`() {
+        // While the flap stands the board's float= is 0 by the check's own
+        // doing, and the rules take a tap after it in place of float=1 (D3):
+        // the gap says so, or "float=1" would send someone to wait for a
+        // word the board cannot say until a dose is granted.
+        assertEquals(
+            listOf(
+                "the board reporting float=1 and pos=ok, or a tap after its float check tripped " +
+                    "(now float 0, pos ok)",
+            ),
+            learningGaps(complete, controller(lastSeen = 990, float = 0, pos = "ok", flap = 1)),
+        )
+        // Without the flap the 0 is the water line, and only float=1 will do.
+        assertEquals(
+            listOf("the board reporting float=1 and pos=ok (now float 0, pos ok)"),
+            learningGaps(complete, controller(lastSeen = 990, float = 0, pos = "ok")),
         )
     }
 
