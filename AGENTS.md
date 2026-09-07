@@ -85,14 +85,18 @@ is on screen. Nothing is queued to send later.
   gated on the sample count and not the size) and `overLine`
   (what to do about a float presumed stuck at full, in the past tense since the page outlives
   the float word; a board sending no `float=` is told its tap counts once it does; `cannotWater`
-  is not gated on it, mirroring the backend), the stale line (which names the way out — the
-  magnet, or one water from the phone — because that page's only clear is a pour),
+  is not gated on it, mirroring the backend), the stale line (which names both ways out, the
+  magnet and one water from the phone: the page clears on the board's float word going back
+  to 1, which a freed magnet gives by itself, but the board's own float check, once tripped,
+  resets only on a granted dose — D7),
   `latchLine`/`latchReason` (the board's reason in a person's words), `latchSteps`/`resumeText`
   (what to do about a stopped board — check the tank, type the board's word, then resume —
   composed once from `LATCH_CLEARS`, the one map from the reason to the word that clears it:
   `clear contra` for `contra`, `dry off` for `resetmid`, which latched dry on the firmware; the
   card, the Resume dialog and the water button's refusal in `Water.kt` all read it, because the
-  refusal used to drop the middle step, without which a resume re-latches at the next report),
+  refusal used to drop the middle step, without which a resume re-latches at the next report;
+  `resumeText` takes the `Latch` itself, since no test renders the dialog's Composable and a
+  reason picked there would go unchecked),
   proposal and dose lines, `needsVerdict` (a dose acked
   between 30 min and 48 h ago with no verdict), `learningGaps` (what the rules need, including
   the board's `float=1 pos=ok` and its tank not being over), `potById` (the key everything navigates

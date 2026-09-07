@@ -290,7 +290,7 @@ private fun ControllersCard(
                         AlertDialog(
                             onDismissRequest = { asking = false },
                             title = { Text("Resume watering on ${boardName(c.controller)}?") },
-                            text = { Text(resumeText(it.reason)) },
+                            text = { Text(resumeText(it)) },
                             confirmButton = {
                                 TextButton(onClick = { asking = false; resume(c.controller) }) { Text("Resume") }
                             },

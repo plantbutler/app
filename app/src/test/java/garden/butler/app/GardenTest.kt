@@ -423,17 +423,19 @@ class GardenTest {
         assertEquals("check the tank, type dry off on the board, then resume", latchSteps("resetmid"))
         // A reason this app does not know gets the contra words, as before.
         assertEquals(latchSteps("contra"), latchSteps("heap"))
+        // The dialog is handed the latch and reads the reason from it: no test
+        // renders the Composable, so the word has to be chosen here, not there.
         assertEquals(
             "Only after the tank has been checked and `clear contra` has been typed on the board. " +
                 "The butler will queue water again.",
-            resumeText("contra"),
+            resumeText(Latch(400, "contra")),
         )
         assertEquals(
             "Only after the tank has been checked and `dry off` has been typed on the board. " +
                 "The butler will queue water again.",
-            resumeText("resetmid"),
+            resumeText(Latch(400, "resetmid")),
         )
-        assertEquals(resumeText("contra"), resumeText("heap"))
+        assertEquals(resumeText(Latch(400, "contra")), resumeText(Latch(400, "heap")))
     }
 
     @Test
@@ -450,11 +452,6 @@ class GardenTest {
                 alerts = listOf(RaisedAlert("latch:0", raisedTs = 500)),
             )
         assertEquals(listOf("board 0 stopped watering (8min ago)"), problems(paged, nowS = 1000))
-        assertEquals(
-            "the float on board 0 still says empty after the refill (8min ago): " +
-                "look at the magnet, or water once from the phone",
-            describeAlert("stale:0", nowS = 1000, raisedTs = 500),
-        )
     }
 
     @Test
@@ -506,11 +503,19 @@ class GardenTest {
     @Test
     fun `the tank alerts become readable lines`() {
         assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
-        // The flap latch's only way out must reach the phone.
+        // D7: two causes, two clears. A freed magnet clears the page by itself
+        // (the float word goes back to 1); the board's own float check, once
+        // tripped, resets only on a granted dose. Both ways out are named,
+        // since the phone is where the page is read.
         assertEquals(
             "the float on board 0 still says empty after the refill: " +
                 "look at the magnet, or water once from the phone",
             describeAlert("stale:0"),
+        )
+        assertEquals(
+            "the float on board 0 still says empty after the refill (8min ago): " +
+                "look at the magnet, or water once from the phone",
+            describeAlert("stale:0", nowS = 1000, raisedTs = 500),
         )
         // Never raised in /health by design; rendered anyway rather than echoing the key.
         assertEquals("board 0 measured its tank", describeAlert("tank:0:1788291874"))

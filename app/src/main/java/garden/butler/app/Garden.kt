@@ -129,9 +129,11 @@ fun latchSteps(reason: String): String =
     "check the tank, type ${latchClear(reason)} on the board, then resume"
 
 /** The Resume dialog's sentence: the first two steps as a condition, with
- * the board's word marked as the thing to type. */
-fun resumeText(reason: String): String =
-    "Only after the tank has been checked and `${latchClear(reason)}` has been typed " +
+ * the board's word marked as the thing to type. Handed the latch, not a
+ * reason: the dialog is the one site no test renders, so the reason is read
+ * here, where it is tested, and the Composable has no word to get wrong. */
+fun resumeText(latch: Latch): String =
+    "Only after the tank has been checked and `${latchClear(latch.reason)}` has been typed " +
         "on the board. The butler will queue water again."
 
 /** The card under a stopped board: why, since when, and the three things to
