@@ -52,8 +52,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.KeyboardType
@@ -282,33 +286,23 @@ private fun Chart(
     window: ChartWindow,
     onWindow: (ChartWindow) -> Unit,
 ) {
-    // The chips stay up while the next window loads: a spinner you cannot leave is a trap.
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ChartWindow.entries.forEach { w ->
-            FilterChip(selected = w == window, onClick = { onWindow(w) }, label = { Text(w.label) })
-        }
-    }
+    ChartChips(window, onWindow)
     if (history == null) {
         if (why == null) Text("loading the last ${window.label}…", style = MaterialTheme.typography.bodySmall)
         why?.let { ErrorText(it) }
         return
     }
-    val caption = chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX))
     // Finger position in pixels and canvas width; -1 means nothing is touching
     // it. The decision itself is sampleNearest(), a pure function — this is only plumbing.
     var scrubX by remember { mutableFloatStateOf(-1f) }
     var widthPx by remember { mutableIntStateOf(0) }
+    val calibrated = isCalibrated(pot.dryRaw, pot.wetRaw)
+    val zone = ZoneId.systemDefault()
     var scrubText: String? = null
     if (history.points.isNotEmpty()) {
-        val calibrated = isCalibrated(pot.dryRaw, pot.wetRaw)
         val gapS = chartGapS(history.bucketS, board, nextDefault)
         val series =
             remember(history, pot.dryRaw, pot.wetRaw, gapS) { chartSeries(history.points, pot.dryRaw, pot.wetRaw, gapS) }
-        val range = chartRange(series, calibrated)
-        val ticksY = yTicks(range, calibrated)
-        val zone = ZoneId.systemDefault()
-        val ticksX =
-            remember(history.since, history.to, zone, window) { windowTicks(window, history.since, history.to, zone) }
         val scrub =
             if (scrubX >= 0 && widthPx > 0) {
                 sampleNearest(series, scrubX / widthPx.toDouble(), history.since, history.to)
@@ -316,91 +310,189 @@ private fun Chart(
                 null
             }
         scrubText = scrub?.let { scrubLabel(it, calibrated, zone) }
-        val primary = MaterialTheme.colorScheme.primary
-        val tertiary = MaterialTheme.colorScheme.tertiary
-        val grid = MaterialTheme.colorScheme.outlineVariant
-        val label = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val measurer = rememberTextMeasurer()
-        Canvas(
-            Modifier.fillMaxWidth()
-                .height(180.dp)
-                .onSizeChanged { widthPx = it.width }
-                // Horizontal only, so dragging the chart never fights the
-                // form scrolling underneath it.
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { scrubX = it.x },
-                        onDragEnd = { scrubX = -1f },
-                        onDragCancel = { scrubX = -1f },
-                    ) { change, _ -> scrubX = change.position.x }
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(onPress = {
-                        scrubX = it.x
-                        tryAwaitRelease()
-                        scrubX = -1f
-                    })
-                },
-        ) {
-            val pad = 2.dp.toPx()
-            val labelH = measurer.measure("00:00", label).size.height
-            val top = labelH.toFloat() // the top value label sits above its gridline
-            val bottom = size.height - labelH - pad // the hour labels sit under the plot
-            val span = (history.to - history.since).coerceAtLeast(1).toFloat()
-            fun x(ts: Long) = (ts - history.since) / span * size.width
-            fun y(v: Double) = (bottom - (v - range.low) / (range.high - range.low) * (bottom - top)).toFloat()
-            for (t in ticksY) drawLine(grid, Offset(0f, y(t.at)), Offset(size.width, y(t.at)), 1f)
-            for (t in ticksX) drawLine(grid, Offset(x(t.ts), top), Offset(x(t.ts), bottom), 1f)
-            val lo = pot.targetLowPct
-            val hi = pot.targetHighPct
-            if (calibrated && lo != null && hi != null && hi > lo) {
-                drawRect(
-                    primary.copy(alpha = 0.12f),
-                    topLeft = Offset(0f, y(hi.toDouble())),
-                    size = Size(size.width, y(lo.toDouble()) - y(hi.toDouble())),
-                )
-            }
-            for (segment in series) {
-                if (segment.size == 1) {
-                    drawCircle(primary, 3.dp.toPx(), Offset(x(segment[0].ts), y(segment[0].value)))
-                    continue
-                }
-                val path = Path()
-                segment.forEachIndexed { i, s ->
-                    if (i == 0) path.moveTo(x(s.ts), y(s.value)) else path.lineTo(x(s.ts), y(s.value))
-                }
-                drawPath(path, primary, style = Stroke(2.dp.toPx()))
-            }
-            pot.lastDose?.sentTs?.takeIf { it in history.since..history.to }?.let { ts ->
-                drawLine(tertiary, Offset(x(ts), top), Offset(x(ts), bottom), 1.dp.toPx())
-            }
-            scrub?.let { s ->
-                drawLine(primary, Offset(x(s.ts), top), Offset(x(s.ts), bottom), 1.dp.toPx())
-                drawCircle(primary, 4.dp.toPx(), Offset(x(s.ts), y(s.value)))
-            }
-            for (t in ticksY) {
-                val text = measurer.measure(t.label, label)
-                drawText(text, topLeft = Offset(pad, y(t.at) - text.size.height))
-            }
-            val now = measurer.measure("now", label)
-            drawText(now, topLeft = Offset(size.width - now.size.width, bottom + pad))
-            for (t in ticksX) { // an hour label that would run into "now" is left out
-                val text = measurer.measure(t.label, label)
-                val left = x(t.ts) + pad
-                if (left + text.size.width + pad < size.width - now.size.width) {
-                    drawText(text, topLeft = Offset(left, bottom + pad))
-                }
-            }
+        ChartCanvas(
+            history,
+            pot,
+            series,
+            calibrated,
+            window,
+            zone,
+            scrub,
+            onWidth = { widthPx = it },
+            onScrubX = { scrubX = it },
+        )
+    }
+    ChartCaption(
+        scrubText,
+        chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX)),
+    )
+    why?.let { ErrorText(it) }
+}
+
+/** Day, week, month. They stay up while the next window loads: a spinner you
+ * cannot leave is a trap. */
+@Composable
+private fun ChartChips(window: ChartWindow, onWindow: (ChartWindow) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ChartWindow.entries.forEach { w ->
+            FilterChip(selected = w == window, onClick = { onWindow(w) }, label = { Text(w.label) })
         }
     }
-    // Under the finger: the sample's own value and time, never an
-    // interpolation — that would be a reading that never happened.
+}
+
+/** Under the chart: what is under the finger while there is one, else what
+ * the curve is made of. The sample's own value and time, never an
+ * interpolation — that would be a reading that never happened. */
+@Composable
+private fun ChartCaption(scrubText: String?, caption: String) {
     if (scrubText != null) {
         Text(scrubText, style = MaterialTheme.typography.bodyMedium)
     } else {
         Text(caption, style = MaterialTheme.typography.bodySmall)
     }
-    why?.let { ErrorText(it) }
+}
+
+@Composable
+private fun ChartCanvas(
+    history: History,
+    pot: Pot,
+    series: List<List<Sample>>,
+    calibrated: Boolean,
+    window: ChartWindow,
+    zone: ZoneId,
+    scrub: Sample?,
+    onWidth: (Int) -> Unit,
+    onScrubX: (Float) -> Unit,
+) {
+    val range = chartRange(series, calibrated)
+    val ticksY = yTicks(range, calibrated)
+    val ticksX =
+        remember(history.since, history.to, zone, window) { windowTicks(window, history.since, history.to, zone) }
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val label = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val measurer = rememberTextMeasurer()
+    Canvas(
+        Modifier.fillMaxWidth()
+            .height(180.dp)
+            .onSizeChanged { onWidth(it.width) }
+            // Horizontal only, so dragging the chart never fights the
+            // form scrolling underneath it.
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { onScrubX(it.x) },
+                    onDragEnd = { onScrubX(-1f) },
+                    onDragCancel = { onScrubX(-1f) },
+                ) { change, _ -> onScrubX(change.position.x) }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    onScrubX(it.x)
+                    tryAwaitRelease()
+                    onScrubX(-1f)
+                })
+            },
+    ) {
+        val pad = 2.dp.toPx()
+        val labelH = measurer.measure("00:00", label).size.height
+        val axis =
+            Axis(
+                since = history.since,
+                span = (history.to - history.since).coerceAtLeast(1).toFloat(),
+                range = range,
+                top = labelH.toFloat(), // the top value label sits above its gridline
+                bottom = size.height - labelH - pad, // the hour labels sit under the plot
+                width = size.width,
+            )
+        drawGrid(axis, grid, ticksY, ticksX)
+        if (calibrated) drawBand(axis, primary, pot.targetLowPct, pot.targetHighPct)
+        drawSeries(axis, primary, series)
+        drawMarks(axis, primary, tertiary, pot.lastDose?.sentTs?.takeIf { it in history.since..history.to }, scrub)
+        drawLabels(axis, measurer, label, ticksY, ticksX, pad)
+    }
+}
+
+/** Seconds and values into pixels: the one mapping every part of the drawing
+ * shares, so no two of them can disagree about where a timestamp is. */
+private class Axis(
+    val since: Long,
+    val span: Float,
+    val range: YRange,
+    val top: Float,
+    val bottom: Float,
+    val width: Float,
+) {
+    fun x(ts: Long): Float = (ts - since) / span * width
+
+    fun y(v: Double): Float = (bottom - (v - range.low) / (range.high - range.low) * (bottom - top)).toFloat()
+}
+
+private fun DrawScope.drawGrid(axis: Axis, colour: Color, ticksY: List<Tick>, ticksX: List<TimeTick>) {
+    for (t in ticksY) drawLine(colour, Offset(0f, axis.y(t.at)), Offset(size.width, axis.y(t.at)), 1f)
+    for (t in ticksX) drawLine(colour, Offset(axis.x(t.ts), axis.top), Offset(axis.x(t.ts), axis.bottom), 1f)
+}
+
+/** The pot's target band, behind the curve. Only a calibrated pot has one:
+ * raw counts and a percentage are not the same axis. */
+private fun DrawScope.drawBand(axis: Axis, colour: Color, low: Int?, high: Int?) {
+    if (low == null || high == null || high <= low) return
+    drawRect(
+        colour.copy(alpha = 0.12f),
+        topLeft = Offset(0f, axis.y(high.toDouble())),
+        size = Size(size.width, axis.y(low.toDouble()) - axis.y(high.toDouble())),
+    )
+}
+
+/** The curve, one path per segment. A segment holding one sample is a dot:
+ * a polyline through a single point draws nothing at all. */
+private fun DrawScope.drawSeries(axis: Axis, colour: Color, series: List<List<Sample>>) {
+    for (segment in series) {
+        if (segment.size == 1) {
+            drawCircle(colour, 3.dp.toPx(), Offset(axis.x(segment[0].ts), axis.y(segment[0].value)))
+            continue
+        }
+        val path = Path()
+        segment.forEachIndexed { i, s ->
+            if (i == 0) path.moveTo(axis.x(s.ts), axis.y(s.value)) else path.lineTo(axis.x(s.ts), axis.y(s.value))
+        }
+        drawPath(path, colour, style = Stroke(2.dp.toPx()))
+    }
+}
+
+/** The two hairlines over the curve: where the last dose went in, and where
+ * the finger is. */
+private fun DrawScope.drawMarks(axis: Axis, colour: Color, doseColour: Color, doseTs: Long?, scrub: Sample?) {
+    doseTs?.let { drawLine(doseColour, Offset(axis.x(it), axis.top), Offset(axis.x(it), axis.bottom), 1.dp.toPx()) }
+    scrub?.let {
+        drawLine(colour, Offset(axis.x(it.ts), axis.top), Offset(axis.x(it.ts), axis.bottom), 1.dp.toPx())
+        drawCircle(colour, 4.dp.toPx(), Offset(axis.x(it.ts), axis.y(it.value)))
+    }
+}
+
+/** The value axis, "now" at the right edge, and as many time labels as fit
+ * without running into it. */
+private fun DrawScope.drawLabels(
+    axis: Axis,
+    measurer: TextMeasurer,
+    style: TextStyle,
+    ticksY: List<Tick>,
+    ticksX: List<TimeTick>,
+    pad: Float,
+) {
+    for (t in ticksY) {
+        val text = measurer.measure(t.label, style)
+        drawText(text, topLeft = Offset(pad, axis.y(t.at) - text.size.height))
+    }
+    val now = measurer.measure("now", style)
+    drawText(now, topLeft = Offset(size.width - now.size.width, axis.bottom + pad))
+    for (t in ticksX) { // an hour label that would run into "now" is left out
+        val text = measurer.measure(t.label, style)
+        val left = axis.x(t.ts) + pad
+        if (left + text.size.width + pad < size.width - now.size.width) {
+            drawText(text, topLeft = Offset(left, axis.bottom + pad))
+        }
+    }
 }
 
 /** Waters the stored pot, and says under itself why it cannot, or where the

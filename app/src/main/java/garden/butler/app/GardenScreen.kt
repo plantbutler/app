@@ -241,25 +241,34 @@ private fun ControllersCard(
                 }
                 tankHint(c)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 overLine(c)?.let { ErrorText(it) }
-                c.latched?.let {
-                    var asking by remember(c.controller) { mutableStateOf(false) }
-                    ErrorText(latchLine(c, nowS))
-                    TextButton(onClick = { asking = true }, enabled = live) { Text("Resume watering") }
-                    if (asking) {
-                        AlertDialog(
-                            onDismissRequest = { asking = false },
-                            title = { Text("Resume watering on ${boardName(c.controller)}?") },
-                            text = { Text(resumeText(it)) },
-                            confirmButton = {
-                                TextButton(onClick = { asking = false; resume(c.controller) }) { Text("Resume") }
-                            },
-                            dismissButton = { TextButton(onClick = { asking = false }) { Text("Not yet") } },
-                        )
-                    }
-                }
+                c.latched?.let { StoppedBoard(c, it, nowS, live) { resume(c.controller) } }
             }
         }
     }
+}
+
+/** A stopped board: why, and the way out. Resume sits behind a confirmation
+ * because two of its three steps happen at the tank and at the board, not
+ * here, and a resume without them re-latches at the board's next report. */
+@Composable
+private fun StoppedBoard(
+    c: ControllerHealth,
+    latch: Latch,
+    nowS: Long,
+    live: Boolean,
+    resume: () -> Unit,
+) {
+    var asking by remember(c.controller) { mutableStateOf(false) }
+    ErrorText(latchLine(c, nowS))
+    TextButton(onClick = { asking = true }, enabled = live) { Text("Resume watering") }
+    if (!asking) return
+    AlertDialog(
+        onDismissRequest = { asking = false },
+        title = { Text("Resume watering on ${boardName(c.controller)}?") },
+        text = { Text(resumeText(latch)) },
+        confirmButton = { TextButton(onClick = { asking = false; resume() }) { Text("Resume") } },
+        dismissButton = { TextButton(onClick = { asking = false }) { Text("Not yet") } },
+    )
 }
 
 @Composable
