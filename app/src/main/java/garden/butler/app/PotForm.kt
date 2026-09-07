@@ -1,22 +1,17 @@
 package garden.butler.app
 
-/** The pot form is one Map<String, String> draft diffed against the stored
- * pot, keyed by the wire names, so the whole thing is a diff and a join —
- * no per-field classes, and no validation: the backend validates, and its
- * refusal is shown verbatim. `input` only picks the keyboard.
- *
- * `help` is the sentence behind the ⓘ. Every field has one, because a
- * form of seventeen boxes labelled in wire names is a form only its author
- * can fill in — and three of these fields (the kind of plant, and the two
- * limits under the dose) are worth more than the box is wide.
- */
+/** The pot edit form: one `Map<String, String>` draft diffed against the
+ * stored pot, keyed by the wire names — no per-field classes and no
+ * client-side validation, since the backend validates and its refusal is
+ * shown verbatim. Every field carries a one-sentence `help` behind its ⓘ,
+ * since seventeen boxes labelled in wire names would otherwise be a form
+ * only its author could fill in. */
 enum class Input {
     TEXT,
     INTEGER,
     DECIMAL,
-    /** One of a closed set: a dropdown, not a box. The backend refuses
-     * anything outside the set, so a typed value could only ever be a
-     * refusal — and, before these were sets, a silent wrong band. */
+    /** One of a closed set: a dropdown, not a box — the backend refuses
+     * anything outside the set. */
     PICK,
 }
 
@@ -30,8 +25,8 @@ fun choicesFor(key: String): List<Kind>? =
     }
 
 /** What to show for a stored value: its label, or the value itself when
- * this build has never heard of it. A pot written by a newer backend, or
- * by free text before these were sets, must render rather than crash. */
+ * this build has never heard of it — a pot written by a newer backend must
+ * render rather than crash. */
 fun labelFor(key: String, wire: String?): String =
     when {
         wire.isNullOrEmpty() -> ""
@@ -226,8 +221,7 @@ val POT_FIELDS: List<Field> =
 
 /** The nickname, which is not a POT_FIELDS key — it is the one thing a
  * create must have, and it is diffed separately — but wants explaining like
- * the rest, because "you may rename this freely" is not obvious of a field
- * that used to be the pot's identity. */
+ * the rest, since a nickname free to rename is not obvious from the field alone. */
 val NAME_FIELD =
     Field(
         "name",
@@ -318,10 +312,9 @@ fun tokenize(value: String): String =
     }
 
 /** One field's value as the wire spells it. A decimal COMMA becomes a
- * point: a phone keyboard set to a locale that writes 14,5 offers a comma
- * and often no point at all, and the backend refuses anything that is not
- * ASCII digits and one point — so the field would be untypable on half the
- * phones in Europe, this one included. */
+ * point: a locale keyboard that writes 14,5 offers a comma and often no
+ * point at all, and the backend accepts only ASCII digits and one point —
+ * without this the field is untypable on many phones in Europe. */
 fun wireValue(field: Field, value: String): String =
     tokenize(value).let { if (field.input == Input.DECIMAL) it.replace(',', '.') else it }
 

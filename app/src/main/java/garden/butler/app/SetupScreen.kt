@@ -32,15 +32,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
-/** Where the butler is. The first screen on a phone that has never been
- * told, and reachable from the garden afterwards.
- *
- * Nothing here can be checked by looking at it: an address that parses may
- * have nothing behind it, and a token is only right or wrong to the butler
- * itself. So Connect makes a real call and the sentence under the fields
- * says which of three things went wrong — the address, the token, or what
- * is listening there. Only one of them is fixed by retyping the token.
- */
+/** Where the butler is: the first screen on a phone never told, and
+ * reachable from the garden afterwards. Nothing here can be checked by
+ * looking at it — an address that parses may have nothing behind it, and a
+ * token is only right or wrong to the butler itself — so Connect makes a
+ * real call, and the sentence under the fields says which of three things
+ * went wrong: the address, the token, or what is listening there. Only one
+ * of them is fixed by retyping the token. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupScreen(model: GardenViewModel, screen: Screen.Setup) {
@@ -105,9 +103,8 @@ fun SetupScreen(model: GardenViewModel, screen: Screen.Setup) {
                 label = { Text("Token") },
                 singleLine = true,
                 enabled = !screen.checking,
-                // Dots by default even when it is already on this device:
-                // the value of showing it is only ever checking a paste, and
-                // that is worth one tap rather than a secret left on screen.
+                // Dots by default even on this device: showing it is only ever
+                // for checking a paste, worth one tap rather than a secret on screen.
                 visualTransformation =
                     if (screen.show) {
                         VisualTransformation.None
