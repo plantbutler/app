@@ -408,8 +408,32 @@ class GardenTest {
                 "Check the tank, type clear contra on the board, then resume.",
             latchLine(c, 1000),
         )
-        assertEquals("it reset with the pump running", latchReason("resetmid"))
+        // A board that reset mid-pour latched dry, and only `dry off` clears that.
+        assertEquals(
+            "board 0 stopped watering 10min ago: it reset with the pump running. " +
+                "Check the tank, type dry off on the board, then resume.",
+            latchLine(c.copy(latched = Latch(since = 400, reason = "resetmid")), 1000),
+        )
         assertEquals("heap", latchReason("heap"))
+    }
+
+    @Test
+    fun `the latch steps and the Resume dialog name the board's word for the reason`() {
+        assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("contra"))
+        assertEquals("check the tank, type dry off on the board, then resume", latchSteps("resetmid"))
+        // A reason this app does not know gets the contra words, as before.
+        assertEquals(latchSteps("contra"), latchSteps("heap"))
+        assertEquals(
+            "Only after the tank has been checked and `clear contra` has been typed on the board. " +
+                "The butler will queue water again.",
+            resumeText("contra"),
+        )
+        assertEquals(
+            "Only after the tank has been checked and `dry off` has been typed on the board. " +
+                "The butler will queue water again.",
+            resumeText("resetmid"),
+        )
+        assertEquals(resumeText("contra"), resumeText("heap"))
     }
 
     @Test
@@ -427,7 +451,8 @@ class GardenTest {
             )
         assertEquals(listOf("board 0 stopped watering (8min ago)"), problems(paged, nowS = 1000))
         assertEquals(
-            "the float on board 0 still says empty after the refill (8min ago)",
+            "the float on board 0 still says empty after the refill (8min ago): " +
+                "look at the magnet, or water once from the phone",
             describeAlert("stale:0", nowS = 1000, raisedTs = 500),
         )
     }
@@ -481,8 +506,10 @@ class GardenTest {
     @Test
     fun `the tank alerts become readable lines`() {
         assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
+        // The flap latch's only way out must reach the phone.
         assertEquals(
-            "the float on board 0 still says empty after the refill",
+            "the float on board 0 still says empty after the refill: " +
+                "look at the magnet, or water once from the phone",
             describeAlert("stale:0"),
         )
         // Never raised in /health by design; rendered anyway rather than echoing the key.
@@ -513,10 +540,11 @@ class GardenTest {
 
     @Test
     fun `the over line names the board and what to do, and a retired row has none`() {
-        val over = controller(lastSeen = 990, tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        val over = controller(lastSeen = 990, float = 1, tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
+        // Past tense: the page outlives the float word that raised it.
         assertEquals(
-            "board 0 pumped more than its tank holds and the float still says full: " +
-                "check the float, refill, then tap refilled.",
+            "board 0 pumped more than its tank holds while the float said full: " +
+                "check the float, refill to the top, then tap refilled.",
             overLine(over),
         )
         assertNull(overLine(over.copy(over = 0)))
@@ -573,7 +601,10 @@ class GardenTest {
         )
         assertNotNull(overLine(empty))
         assertEquals(overLine(full), overLine(empty))
-        assertEquals(overLine(full), overLine(mute))
+        // A board sending no float= cannot be told to check it, and its tap
+        // counts only once the word is back: the line under OVER says so.
+        assertEquals("board 0 is not sending its float; a tap counts once it does.", overLine(mute))
+        assertNull(overLine(mute.copy(tankSamples = null)))
         // Both stand at once: the empty reservoir and the presumed-stuck float.
         assertEquals(
             listOf(
@@ -744,7 +775,7 @@ class GardenTest {
         val over =
             controller(lastSeen = 990, float = 1, pos = "ok", tankMl = 4000, tankSamples = 2, pumpedMl = 4500, over = 1)
         assertEquals(
-            listOf("the board not having pumped more than its tank holds"),
+            listOf("the board's tank not being over: refill to the top and tap refilled"),
             learningGaps(complete, over),
         )
         assertEquals(emptyList(), learningGaps(complete, over.copy(over = 0)))
@@ -752,7 +783,7 @@ class GardenTest {
         assertEquals(
             listOf(
                 "the board reporting float=1 and pos=ok (now float 0, pos ok)",
-                "the board not having pumped more than its tank holds",
+                "the board's tank not being over: refill to the top and tap refilled",
             ),
             learningGaps(complete, over.copy(float = 0)),
         )

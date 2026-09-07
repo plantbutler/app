@@ -98,6 +98,11 @@ class WaterTest {
             "board 0 stopped watering (the float said full and the meter saw nothing) — check the tank, type clear contra on the board, then resume it on the garden screen",
             cannotWater(ready, stopped, 1000, 60, emptySet()),
         )
+        // The middle step is the board's word for the latch it holds.
+        assertEquals(
+            "board 0 stopped watering (it reset with the pump running) — check the tank, type dry off on the board, then resume it on the garden screen",
+            cannotWater(ready, stopped.copy(latched = Latch(900, "resetmid")), 1000, 60, emptySet()),
+        )
         val silentAndStopped = controller(lastSeen = 10, latched = Latch(900, "contra"))
         assertTrue(cannotWater(ready, silentAndStopped, 1000, 60, emptySet())!!.startsWith("board 0 is silent"))
     }

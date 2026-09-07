@@ -83,14 +83,19 @@ is on screen. Nothing is queued to send later.
   line: null without `tank_samples` and on a retired row), `tankHint` (the one sentence that
   says what the refilled chip means — full to the top — shown while the tank is being learnt,
   gated on the sample count and not the size) and `overLine`
-  (what to do about a float presumed stuck at full; `cannotWater` is not gated on it, mirroring
-  the backend), `latchLine`/`latchReason` (the
-  board's reason in a person's words) and `LATCH_STEPS` (what to do about a stopped board —
-  check the tank, type clear contra on the board, then resume — said once, because the water
-  button's refusal in `Water.kt` repeats it and used to drop the `clear contra` step, without
-  which a resume re-latches at the next report), proposal and dose lines, `needsVerdict` (a dose acked
+  (what to do about a float presumed stuck at full, in the past tense since the page outlives
+  the float word; a board sending no `float=` is told its tap counts once it does; `cannotWater`
+  is not gated on it, mirroring the backend), the stale line (which names the way out — the
+  magnet, or one water from the phone — because that page's only clear is a pour),
+  `latchLine`/`latchReason` (the board's reason in a person's words), `latchSteps`/`resumeText`
+  (what to do about a stopped board — check the tank, type the board's word, then resume —
+  composed once from `LATCH_CLEARS`, the one map from the reason to the word that clears it:
+  `clear contra` for `contra`, `dry off` for `resetmid`, which latched dry on the firmware; the
+  card, the Resume dialog and the water button's refusal in `Water.kt` all read it, because the
+  refusal used to drop the middle step, without which a resume re-latches at the next report),
+  proposal and dose lines, `needsVerdict` (a dose acked
   between 30 min and 48 h ago with no verdict), `learningGaps` (what the rules need, including
-  the board's `float=1 pos=ok` and it not being over), `potById` (the key everything navigates
+  the board's `float=1 pos=ok` and its tank not being over), `potById` (the key everything navigates
   by; an empty id is never a key) and `potNamed` (only the two places that have a name and not
   an id).
 - `PotForm.kt` — the form is one `Map<String,String>` draft diffed against the stored pot:

@@ -290,12 +290,7 @@ private fun ControllersCard(
                         AlertDialog(
                             onDismissRequest = { asking = false },
                             title = { Text("Resume watering on ${boardName(c.controller)}?") },
-                            text = {
-                                Text(
-                                    "Only after the tank has been checked and `clear contra` has been " +
-                                        "typed on the board. The butler will queue water again."
-                                )
-                            },
+                            text = { Text(resumeText(it.reason)) },
                             confirmButton = {
                                 TextButton(onClick = { asking = false; resume(c.controller) }) { Text("Resume") }
                             },

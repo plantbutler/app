@@ -112,10 +112,27 @@ private val LATCH_WORDS =
 
 fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
 
-/** What to do about a stopped board, said once: the card under the board
- * and the water button's refusal must not disagree about the middle step,
- * the one without which a resume re-latches at the board's next report. */
-const val LATCH_STEPS = "check the tank, type clear contra on the board, then resume"
+/** The board's word that clears the latch it holds, by the reason it gave.
+ * `clear contra` clears the contradiction latch only; a board that reset
+ * mid-pour latched dry, which only `dry off` clears. A reason this app
+ * does not know gets the contra word, as before. */
+private val LATCH_CLEARS = mapOf("contra" to "clear contra", "resetmid" to "dry off")
+
+private fun latchClear(reason: String): String =
+    LATCH_CLEARS[reason] ?: LATCH_CLEARS.getValue("contra")
+
+/** What to do about a stopped board, said once: the card under the board,
+ * the Resume dialog and the water button's refusal must not disagree about
+ * the middle step, the one without which a resume re-latches at the board's
+ * next report. */
+fun latchSteps(reason: String): String =
+    "check the tank, type ${latchClear(reason)} on the board, then resume"
+
+/** The Resume dialog's sentence: the first two steps as a condition, with
+ * the board's word marked as the thing to type. */
+fun resumeText(reason: String): String =
+    "Only after the tank has been checked and `${latchClear(reason)}` has been typed " +
+        "on the board. The butler will queue water again."
 
 /** The card under a stopped board: why, since when, and the three things to
  * do — two of which are not in this app. */
@@ -123,7 +140,7 @@ fun latchLine(c: ControllerHealth, nowS: Long): String {
     val latch = c.latched ?: return ""
     val since = if (latch.since in 1..nowS) " ${agoText(latch.since, nowS)}" else ""
     return "${boardName(c.controller)} stopped watering$since: ${latchReason(latch.reason)}. " +
-        LATCH_STEPS.replaceFirstChar { it.uppercase() } + "."
+        latchSteps(latch.reason).replaceFirstChar { it.uppercase() } + "."
 }
 
 fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
@@ -139,7 +156,9 @@ fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
         "pos" -> "${board(1)} lost its manifold position$since"
         "latch" -> "${board(1)} stopped watering$since"
         "over" -> "${board(1)} pumped more than its tank holds$since"
-        "stale" -> "the float on ${board(1)} still says empty after the refill$since"
+        "stale" ->
+            "the float on ${board(1)} still says empty after the refill$since: " +
+                "look at the magnet, or water once from the phone"
         // A one-shot the backend keeps out of /health; rendered all the same.
         "tank" -> "${board(1)} measured its tank$since"
         "sensor" ->
@@ -273,15 +292,20 @@ fun tankHint(c: ControllerHealth): String? =
     }
 
 /** The line under a board the butler presumes stuck at full, or null: what
- * happened and the three things to do, the last of which is the clear. Not
- * gated on the float word: a 0 is a contra, a flap or an omitted `float=`
- * as often as an empty tank, and the tap is the only clear. */
+ * happened (in the past tense — the page outlives the float word that
+ * raised it) and the three things to do, the last of which is the clear.
+ * Shown whatever the float says now: a 0 is a contra, a flap or an omitted
+ * `float=` as often as an empty tank, and the tap is the only clear. A board
+ * sending no float word cannot be told to check it, and the backend counts
+ * its tap only once the word is back, so that row says so instead. */
 fun overLine(c: ControllerHealth): String? =
-    if (overShown(c)) {
-        "${boardName(c.controller)} pumped more than its tank holds and the float still says " +
-            "full: check the float, refill, then tap refilled."
-    } else {
-        null
+    when {
+        !overShown(c) -> null
+        c.float == null ->
+            "${boardName(c.controller)} is not sending its float; a tap counts once it does."
+        else ->
+            "${boardName(c.controller)} pumped more than its tank holds while the float said " +
+                "full: check the float, refill to the top, then tap refilled."
     }
 
 fun hasOverride(c: ControllerHealth): Boolean = c.nextS != null
@@ -353,7 +377,9 @@ fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
             "the board reporting float=1 and pos=ok (now float ${controller?.float ?: "?"}, " +
                 "pos ${controller?.pos ?: "?"})"
     }
-    if (controller?.over == 1) gaps += "the board not having pumped more than its tank holds"
+    if (controller?.over == 1) {
+        gaps += "the board's tank not being over: refill to the top and tap refilled"
+    }
     return gaps
 }
 
