@@ -53,7 +53,7 @@ class GardenViewModelTest {
         @Volatile var lastDose: String? = null
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
         @Volatile var resumeAnswer = MockResponse().setBody("resumed=0\n")
-        /** What b1's one slot holds, as /health shows it. */
+        /** What board 0's one slot holds, as /health shows it. */
         @Volatile var slot: String? = null
         /** The band the backend would offer pot-1, as /pots carries it. */
         @Volatile var advice: String? = null
@@ -895,7 +895,6 @@ class GardenViewModelTest {
         val first = waitFor("a full page") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
         assertEquals(DOSES_LIMIT, first.doses?.size)
 
-        // Load older, held on the wire, then pull to refresh over it.
         val gate = CountDownLatch(1)
         butler.dosesGate = gate
         onMain { loadOlderDoses() }
@@ -1008,7 +1007,7 @@ class GardenViewModelTest {
     fun `an unwired pot still fetches its chart`() {
         // The readings carry the pot they were taken for, so a pot with no
         // controller and no channel — just back from the graveyard, say —
-        // has a curve. It used to return early and render nothing.
+        // still has a curve.
         ready()
         onMain { open("pot-3") }
         waitFor("the curve") { butler.histories().firstOrNull() }
