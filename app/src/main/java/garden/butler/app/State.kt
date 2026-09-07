@@ -98,3 +98,9 @@ sealed interface Screen {
         val loadingMore: Boolean = false,
     ) : Screen
 }
+
+/** An id identifies a form on its own — a rename must not orphan the outcome
+ * of the save that renamed it. Two create forms have no id, so only there
+ * does the typed name tell them apart. */
+internal fun Screen.Pot.isForm(other: Screen.Pot): Boolean =
+    if (id != null) id == other.id else other.id == null && draft["name"] == other.draft["name"]
