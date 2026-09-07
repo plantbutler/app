@@ -172,6 +172,30 @@ class GardenViewModel(
     private fun background(block: suspend CoroutineScope.() -> Unit): Job =
         viewModelScope.launch(work, block = block)
 
+    /** One kind of load, of which only the newest may land. It cancels the
+     * job before it and answers the new one for the caller to keep: two
+     * answers racing would otherwise let the slower put an older curve,
+     * strip or page back over a newer one. A cancelled job lands nothing —
+     * not even its failure, which is what ensureActive() is there for. */
+    private fun <T> latestOnly(
+        previous: Job?,
+        fetch: suspend () -> T,
+        land: (T) -> Unit,
+        failed: (String) -> Unit,
+    ): Job {
+        previous?.cancel()
+        return background {
+            try {
+                land(withContext(Dispatchers.IO) { fetch() })
+            } catch (why: CancellationException) {
+                throw why
+            } catch (why: Exception) {
+                ensureActive()
+                failed(why.reason())
+            }
+        }
+    }
+
     /** True once the app knows which butler it is talking to. Nothing goes
      * on the wire before that, and nothing comes off the disk either. */
     private var addressed = settings == null
@@ -349,22 +373,13 @@ class GardenViewModel(
         // were taken for, so a pot that is currently unwired — brought back
         // from the graveyard, or waiting to be replugged — still has a curve.
         val id = form.id ?: return
-        historyFlight?.cancel()
         historyFlight =
-            background {
-                try {
-                    val history =
-                        withContext(Dispatchers.IO) {
-                            backend.history(id, form.window.hours, form.window.bucketS)
-                        }
-                    onPot(form) { it.copy(history = history, historyWhy = null) }
-                } catch (why: CancellationException) {
-                    throw why
-                } catch (why: Exception) {
-                    ensureActive()
-                    onPot(form) { it.copy(historyWhy = "chart: " + why.reason()) }
-                }
-            }
+            latestOnly(
+                historyFlight,
+                { backend.history(id, form.window.hours, form.window.bucketS) },
+                { history -> onPot(form) { it.copy(history = history, historyWhy = null) } },
+                { why -> onPot(form) { it.copy(historyWhy = "chart: $why") } },
+            )
     }
 
     /** The pot's own growth history. Single-flight like the chart's loader:
@@ -373,19 +388,13 @@ class GardenViewModel(
      * already up and says why beside it. */
     private fun loadPhotos(form: Screen.Pot) {
         val id = form.id ?: return
-        photosFlight?.cancel()
         photosFlight =
-            background {
-                try {
-                    val answer = withContext(Dispatchers.IO) { backend.photos(id) }
-                    onPot(form) { it.copy(photos = answer.photos, photosWhy = null) }
-                } catch (why: CancellationException) {
-                    throw why
-                } catch (why: Exception) {
-                    ensureActive()
-                    onPot(form) { it.copy(photosWhy = "pictures: " + why.reason()) }
-                }
-            }
+            latestOnly(
+                photosFlight,
+                { backend.photos(id) },
+                { answer -> onPot(form) { it.copy(photos = answer.photos, photosWhy = null) } },
+                { why -> onPot(form) { it.copy(photosWhy = "pictures: $why") } },
+            )
     }
 
     fun reloadPhotos() = (shown.value as? Screen.Pot)?.let { loadPhotos(it) }
@@ -702,13 +711,13 @@ class GardenViewModel(
      * fresher list with an older one. The job is shared with the pager,
      * so a reload also cancels a page that is on its way. */
     private fun loadDoses(screen: Screen.Doses) {
-        dosesFlight?.cancel()
         val fresh = screen.copy(loadingMore = false)
         shown.value = fresh
         dosesFlight =
-            background {
-                try {
-                    val answer = withContext(Dispatchers.IO) { backend.doses(fresh.potId, DOSES_LIMIT) }
+            latestOnly(
+                dosesFlight,
+                { backend.doses(fresh.potId, DOSES_LIMIT) },
+                { answer ->
                     onDoses(fresh) {
                         it.copy(
                             doses = answer.doses,
@@ -722,14 +731,10 @@ class GardenViewModel(
                             why = null,
                         )
                     }
-                } catch (why: CancellationException) {
-                    throw why
-                } catch (why: Exception) {
-                    ensureActive()
-                    // The list already up stays up: a failed reload is weather.
-                    onDoses(fresh) { it.copy(loading = false, why = why.reason()) }
-                }
-            }
+                },
+                // The list already up stays up: a failed reload is weather.
+                { why -> onDoses(fresh) { it.copy(loading = false, why = why) } },
+            )
     }
 
     /** The page before the oldest row on screen. Appended, never replacing:
@@ -741,13 +746,13 @@ class GardenViewModel(
         // stepped over and never asked for again.
         if (screen.loading || screen.loadingMore || !screen.more) return
         val cursor = screen.doses?.lastOrNull()?.let(::doseCursor) ?: return
-        dosesFlight?.cancel()
         val asking = screen.copy(loadingMore = true, why = null)
         shown.value = asking
         dosesFlight =
-            background {
-                try {
-                    val answer = withContext(Dispatchers.IO) { backend.doses(asking.potId, DOSES_LIMIT, cursor) }
+            latestOnly(
+                dosesFlight,
+                { backend.doses(asking.potId, DOSES_LIMIT, cursor) },
+                { answer ->
                     onDoses(asking) {
                         it.copy(
                             doses = (it.doses ?: emptyList()) + answer.doses,
@@ -755,13 +760,9 @@ class GardenViewModel(
                             loadingMore = false,
                         )
                     }
-                } catch (why: CancellationException) {
-                    throw why
-                } catch (why: Exception) {
-                    ensureActive()
-                    onDoses(asking) { it.copy(loadingMore = false, why = why.reason()) }
-                }
-            }
+                },
+                { why -> onDoses(asking) { it.copy(loadingMore = false, why = why) } },
+            )
     }
 
     /** An answer lands only on the history it was asked for: the user may
