@@ -12,6 +12,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -35,10 +36,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 
-/** The wizard's face: one card per CalState. Polling runs only while the
- * screen is started, and leaving the foreground cancels the wizard — a
- * phone in a pocket must not keep a board at 5 s, and the restore has to
- * run while the app is still awake to run it. A rotation is not leaving. */
+/** The recalibration wizard: one card per CalState. Polling runs only while
+ * the screen is started, and leaving the foreground cancels the wizard — a
+ * phone in a pocket must not keep a board at 5 s, and the restore needs the
+ * app awake to run it. A rotation is not leaving. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalibrateScreen(model: GardenViewModel, screen: Screen.Calibrate) {
@@ -47,7 +48,7 @@ fun CalibrateScreen(model: GardenViewModel, screen: Screen.Calibrate) {
     // titles this screen, and titles it with the name it now has.
     val pot = screen.parent.id?.let { (state as? UiState.Ready)?.garden?.potById(it) }
     val name = pot?.name ?: screen.parent.original["name"].orEmpty()
-    val controller = pot?.controller?.let { "board $it" } ?: "the board"
+    val controller = pot?.controller?.let { boardName(it) } ?: "the board"
     var nowS by remember { mutableLongStateOf(model.nowS()) }
     val owner = LocalLifecycleOwner.current
     val activity = LocalContext.current as? Activity
@@ -115,7 +116,7 @@ private fun Body(cal: CalState, controller: String, nowS: Long, send: (CalEvent)
             Text("dry ${cal.dry} · wet ${cal.wet}", style = MaterialTheme.typography.titleLarge)
             calHint(cal.dry, cal.wet)?.let { Centered(it) }
             cal.refused?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                ErrorText(it, LocalTextStyle.current, TextAlign.Center)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { send(CalEvent.Save) }) { Text("Save") }
@@ -140,10 +141,9 @@ private fun Restoring(controller: String) {
     CircularProgressIndicator()
 }
 
-/** The number to watch, how old it is, and the few before it so "settled"
- * is visible rather than guessed — plus how many of the three this endpoint
- * would be the median of. Tapping with fewer is allowed; it says what it
- * would use. */
+/** The number to watch, its age, and the few before it so "settled" is
+ * visible rather than guessed, plus how many of three the tap would median.
+ * Tapping with fewer is allowed; it says what it would use. */
 @Composable
 private fun Readings(instruction: String, cal: CalState, nowS: Long) {
     Centered(instruction)
@@ -152,9 +152,8 @@ private fun Readings(instruction: String, cal: CalState, nowS: Long) {
     Text(newest?.raw?.toString() ?: "—", style = MaterialTheme.typography.displayMedium)
     Small(newest?.let { agoText(it.readTs, nowS) } ?: "waiting for a report")
     // The strip is the samples a tap would take, not every report polled:
-    // just after the dry end is captured, the reports that served it are
-    // still in `seen` but are deliberately not eligible for the wet one, and
-    // showing them beside a count that excludes them reads like a bug.
+    // just after the dry end, `seen` still holds the reports that served it,
+    // but they are deliberately not eligible for the wet one.
     val samples = tapSamples(cal)
     if (samples.isNotEmpty()) Small(samples.joinToString(" · ") { "${it.raw}" })
     Small(settleLine(samples.size))

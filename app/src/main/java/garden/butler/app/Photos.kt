@@ -11,11 +11,10 @@ const val PHOTOS_LIMIT = 200
 
 /** What the long edge is shrunk to before anything is uploaded.
  *
- * The pitch's first rabbit hole: a phone photo is several megabytes and the
- * NAS volume and its backup were never sized for hundreds of them. 1600 is
- * more than a phone screen shows and about 300-500 KB as a JPEG, so a
- * decade of weekly pictures is a couple of hundred megabytes rather than a
- * couple of dozen gigabytes. */
+ * A phone photo is several megabytes and the NAS volume and its backup were
+ * never sized for hundreds of them. 1600 is more than a phone screen shows
+ * and about 300-500 KB as a JPEG, so a decade of weekly pictures is a
+ * couple of hundred megabytes rather than a couple of dozen gigabytes. */
 const val PHOTO_LONG_EDGE = 1600
 
 /** JPEG quality on the way out. High enough that nobody can see the
@@ -49,7 +48,7 @@ fun fitted(w: Int, h: Int, cap: Int = PHOTO_LONG_EDGE): Pair<Int, Int> {
 
 /** The strip's order: oldest first, so it reads left to right as the plant
  * grew. The wire is newest first, like every other list here. */
-fun strip(photos: List<Photo>): List<Photo> = photos.sortedWith(compareBy({ it.ts }, { it.id }))
+fun oldestFirst(photos: List<Photo>): List<Photo> = photos.sortedWith(compareBy({ it.ts }, { it.id }))
 
 /** Where one plant ended and the next began, as the ids the strip should
  * put a mark before.
@@ -60,7 +59,7 @@ fun strip(photos: List<Photo>): List<Photo> = photos.sortedWith(compareBy({ it.t
  * leaves no trace, and neither does a plant that was never named. The first
  * photograph is never a break; it is where the strip starts. */
 fun speciesBreaks(photos: List<Photo>): Set<String> {
-    val ordered = strip(photos)
+    val ordered = oldestFirst(photos)
     val breaks = mutableSetOf<String>()
     var previous: String? = null
     ordered.forEachIndexed { i, photo ->

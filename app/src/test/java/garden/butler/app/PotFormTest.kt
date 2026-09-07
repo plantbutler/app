@@ -246,9 +246,6 @@ class PotFormTest {
 
     @Test
     fun `the label of a measurement says what it is measured in`() {
-        // The field this replaces was called "pot size" and read the words
-        // small and large, so 14cm — the README's own example, and the "3"
-        // in the live garden — moved the band by nothing at all.
         assertEquals("pot diameter (cm)", POT_FIELDS.first { it.key == "pot_diameter_cm" }.label)
         assertEquals("plant height (cm)", POT_FIELDS.first { it.key == "plant_height_cm" }.label)
     }
@@ -319,10 +316,8 @@ class PotFormTest {
         val answered = mapOf("plant_type" to "cactus")
         assertEquals("cactus", withKind(answered, "herb")["plant_type"])
         assertEquals("herb", suggestedKind(answered, "herb"))
-        // Nothing to offer when the field already agrees, or when the
-        // lookup had no idea, or when it named something no chip shows.
-        // "moss" is not a kind and is not going to become one; "orchid"
-        // was the example here until it did.
+        // Nothing to offer when the field already agrees, when the lookup
+        // had no idea, or when it names something no chip shows.
         assertNull(suggestedKind(mapOf("plant_type" to "herb"), "herb"))
         assertNull(suggestedKind(empty, null))
         assertNull(suggestedKind(empty, "moss"))

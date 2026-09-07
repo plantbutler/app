@@ -11,9 +11,9 @@ import kotlin.test.assertTrue
 class SettingsTest {
     @Test
     fun `an address typed without a scheme gets http, never https`() {
-        // The pitch's rabbit hole: the laptop backend is plain HTTP on a LAN
-        // address and the NAS is plain HTTP on the tailnet, so cleartext has
-        // to keep working and the field cannot insist on https.
+        // The laptop backend is plain HTTP on a LAN address and the NAS is
+        // plain HTTP on the tailnet, so cleartext has to keep working and
+        // the field cannot insist on https.
         assertEquals("http://192.168.1.42:9380", normaliseUrl("192.168.1.42:9380"))
         assertEquals("http://100.64.0.1:9380", normaliseUrl("  100.64.0.1:9380  "))
         assertEquals("http://ciccia:9380", normaliseUrl("ciccia:9380"))
@@ -105,14 +105,14 @@ class SettingsTest {
 
     @Test
     fun `a butler that answers is a butler`() {
-        val probe = readHello(200, "butler=0.14.0\n")
+        val probe = classifyHello(200, "butler=0.14.0\n")
         assertEquals(Probe.Butler("0.14.0"), probe)
         assertTrue(probeLine(probe, "ciccia:9380").contains("0.14.0"))
     }
 
     @Test
     fun `a 401 is the token and says so`() {
-        val probe = readHello(401, "bad token\n")
+        val probe = classifyHello(401, "bad token\n")
         assertEquals(Probe.WrongToken, probe)
         val line = probeLine(probe, "ciccia:9380")
         // The whole value of this screen: which of the two it was, and that
@@ -123,7 +123,7 @@ class SettingsTest {
 
     @Test
     fun `a 404 could be an old butler or another service, and says both`() {
-        val probe = readHello(404, "Not Found")
+        val probe = classifyHello(404, "Not Found")
         assertIs<Probe.NotTheButler>(probe)
         assertTrue(probe.why.contains("0.13.0"), probe.why)
         assertTrue(probe.why.contains("another service"), probe.why)
@@ -132,18 +132,18 @@ class SettingsTest {
     @Test
     fun `a 200 that is not a butler is not taken for one`() {
         // A router's admin page, a printer, anything on that port.
-        val probe = readHello(200, "<html><body>Login</body></html>")
+        val probe = classifyHello(200, "<html><body>Login</body></html>")
         assertIs<Probe.NotTheButler>(probe)
         assertTrue(probeLine(probe, "x").contains("not your butler"))
     }
 
     @Test
     fun `another status quotes what came back, short`() {
-        val probe = readHello(503, "try again: database is locked")
+        val probe = classifyHello(503, "try again: database is locked")
         assertIs<Probe.NotTheButler>(probe)
         assertTrue(probe.why.contains("503"), probe.why)
         assertTrue(probe.why.contains("database is locked"), probe.why)
-        assertTrue(readHello(500, "x".repeat(500)).let { it as Probe.NotTheButler }.why.length < 200)
+        assertTrue(classifyHello(500, "x".repeat(500)).let { it as Probe.NotTheButler }.why.length < 200)
     }
 
     @Test

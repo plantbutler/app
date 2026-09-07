@@ -3,8 +3,6 @@ package garden.butler.app
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,8 +52,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.input.KeyboardType
@@ -70,9 +72,8 @@ import kotlinx.coroutines.delay
 private val MODES = listOf("manual", "learning", "auto")
 private val VERDICTS = listOf("ok", "too_much", "too_little")
 
-/** One pot: what it reads now, what waits for a tap, and the form. The
- * form renders from the screen's own snapshot, so a pot that vanishes
- * mid-edit does not blank the fields. */
+/** One pot: current reading, chart and edit form — rendered from the screen's
+ * own snapshot, so a pot that vanishes mid-edit does not blank the fields. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
@@ -80,8 +81,8 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     val garden = (state as? UiState.Ready)?.garden
     val cachedAtS = (state as? UiState.Ready)?.cachedAtS
     val pot = screen.id?.let { garden?.potById(it) }
-    // The title follows the pot, not the key: a rename lands here on the
-    // next refresh. A pot that vanished keeps the name the form opened on.
+    // Keyed on the pot, not fixed at open: a rename shows up on the next
+    // refresh, and a pot that vanished keeps the name the form opened on.
     val title = pot?.name ?: screen.original["name"] ?: "New pot"
     val nowS = model.nowS()
     val emptied = emptiedFields(screen.original, screen.draft)
@@ -90,8 +91,8 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     var askDiscard by remember { mutableStateOf(false) }
     val leave = { if (dirty) askDiscard = true else model.back() }
     BackHandler(onBack = leave)
-    // The queued dose is followed from here, not the model: polling stops
-    // with the screen, and reads the latest form so Done/Expired ends it.
+    // Polling for the queued dose lives on the screen, not the model, so it
+    // stops when the screen does, and reads the latest form so Done/Expired ends it.
     val latest by rememberUpdatedState(screen)
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(screen.watering) {
@@ -103,10 +104,8 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             }
         }
     }
-    // One field's ⓘ. A dialog rather than a tooltip: it is the same
-    // gesture as everything else on this screen, it survives a rotation,
-    // and a long-press hint on a form nobody knows has hints is a hint
-    // nobody finds.
+    // A dialog, not a tooltip: it survives rotation and uses the same tap
+    // gesture as the rest of the screen, unlike a long-press nobody finds.
     fieldFor(screen.explaining)?.let { field ->
         AlertDialog(
             onDismissRequest = model::stopExplaining,
@@ -137,19 +136,11 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            cachedAtS?.let {
-                Text(
-                    staleLine(it, nowS),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.titleSmall,
-                )
-            }
+            cachedAtS?.let { ErrorText(staleLine(it, nowS), MaterialTheme.typography.titleSmall) }
             if (pot != null) Text(potLine(pot, nowS), style = MaterialTheme.typography.headlineSmall)
             val health = garden?.health
             val board = health?.controllers?.firstOrNull { it.controller == pot?.controller }
-            // Gated on the pot alone: the chart is history, and a pot that
-            // has been unwired — brought back from the graveyard, or waiting
-            // to be replugged — still owns every reading it ever took.
+            // Gated on the pot alone: an unwired pot still owns every reading it ever took.
             if (pot != null) {
                 Chart(
                     screen.history,
@@ -161,9 +152,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                     model::setChartWindow,
                 )
             }
-            // Under the curve, and read the same way: left to right, over
-            // time. An environment pot is a sensor on a shelf and has no
-            // plant to photograph.
+            // An environment pot is a sensor on a shelf, not a plant, so no strip.
             if (pot == null || !pot.name.startsWith(ENV_PREFIX)) {
                 PhotoStrip(screen, pot, model)
             }
@@ -176,20 +165,19 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                     model,
                 )
             }
-            // Stale: every one of these would be refused, so they look it
-            // rather than only saying so after the tap.
+            // Stale data disables these rather than refusing only after the tap.
             val live = cachedAtS == null
             if (pot?.status == ALIVE) { // a buried pot is neither proposed for nor dosed
                 pot.proposal?.let { ProposalCard(it, nowS, live) { model.approve(it.id) } }
                 pot.lastDose?.let { DoseCard(it, nowS, live) { v -> model.verdict(it.id, v) } }
                 pot.advice?.let {
-                    AdviceCard(it, live && !screen.saving, { model.applyAdvice(it) }, model::dismissAdvice)
+                    AdviceCard(it, live && !screen.busy, { model.applyAdvice(it) }, model::dismissAdvice)
                 }
             }
             if (pot != null) {
                 TextButton(
                     onClick = { model.openDoses(pot.id, "${pot.name}'s water") },
-                    enabled = !screen.saving, // leaving mid-save would strand this form
+                    enabled = !screen.busy, // mid-save, leaving would strand the form
                 ) {
                     Text("Watering history")
                 }
@@ -208,23 +196,19 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                 )
             }
             val named = !screen.draft["name"].isNullOrBlank()
-            // Save goes grey without a name; say so, the way a blanked
-            // stored field says so, rather than leave the user hunting.
+            // Save goes grey without a name; say so rather than leave it unexplained.
             if (!named) {
                 Text("give the pot a name", style = MaterialTheme.typography.bodySmall)
             }
             Button(
                 onClick = model::save,
-                enabled = dirty && named && !screen.saving && emptied.isEmpty() && !collision && live,
+                enabled = dirty && named && !screen.busy && emptied.isEmpty() && !collision && live,
             ) {
                 Text("Save")
             }
-            screen.refused?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-            // Last, below Save, and only for a pot that exists. The
-            // graveyard is the reversible answer and is a chip in the form
-            // above; this one is not, so it stands apart and asks.
+            screen.refused?.let { ErrorText(it) }
+            // The graveyard chip above is the reversible answer; this is not,
+            // so it stands apart, below Save, and only for a pot that exists.
             if (screen.id != null) {
                 HorizontalDivider()
                 Erase(screen.id, pot?.name ?: screen.original["name"].orEmpty(), live, model)
@@ -233,10 +217,9 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
     }
 }
 
-/** Erasing the pot. Two taps, and the second one names the plant and says
- * what goes — a list, not a "this cannot be undone" nobody reads. Greyed
- * while the screen is a memory: the one irreversible action here must not
- * be the one thing allowed against a garden nobody has confirmed. */
+/** Erasing the pot. Two taps; the second names the plant and lists what goes,
+ * not a generic "cannot be undone". Disabled while the screen is a cached
+ * memory — the one irreversible action must never be the one thing still allowed. */
 @Composable
 private fun Erase(potId: String, name: String, live: Boolean, model: GardenViewModel) {
     var asking by remember(potId) { mutableStateOf(false) }
@@ -290,11 +273,9 @@ private fun draftPot(draft: Map<String, String>, stored: Pot?): Pot =
         doseMl = draft["dose_ml"]?.toIntOrNull(),
     )
 
-/** The last 24 h as a polyline over faint gridlines: % under the pot's
- * calibration inside its target band, else raw counts on their own span.
- * The axis values sit just inside the plot, the wall-clock hours under it.
- * A silent stretch is a hole, not a straight line across it; the last dose
- * is a hairline. */
+/** The chosen window as a polyline over faint gridlines: % inside the pot's
+ * target band when calibrated, else raw counts on their own span. A silent
+ * stretch is a gap, not a straight line across it; the last dose is a hairline. */
 @Composable
 private fun Chart(
     history: History?,
@@ -305,133 +286,218 @@ private fun Chart(
     window: ChartWindow,
     onWindow: (ChartWindow) -> Unit,
 ) {
-    // The chips stay up while the next window loads: they are how you get
-    // back, and a spinner you cannot leave is a trap.
+    ChartChips(window, onWindow)
+    if (history == null) {
+        if (why == null) Text("loading the last ${window.label}…", style = MaterialTheme.typography.bodySmall)
+        why?.let { ErrorText(it) }
+        return
+    }
+    // Finger position in pixels and canvas width; -1 means nothing is touching
+    // it. The decision itself is sampleNearest(), a pure function — this is only plumbing.
+    var scrubX by remember { mutableFloatStateOf(-1f) }
+    var widthPx by remember { mutableIntStateOf(0) }
+    val calibrated = isCalibrated(pot.dryRaw, pot.wetRaw)
+    val zone = ZoneId.systemDefault()
+    var scrubText: String? = null
+    if (history.points.isNotEmpty()) {
+        val gapS = chartGapS(history.bucketS, board, nextDefault)
+        val series =
+            remember(history, pot.dryRaw, pot.wetRaw, gapS) { chartSeries(history.points, pot.dryRaw, pot.wetRaw, gapS) }
+        val scrub =
+            if (scrubX >= 0 && widthPx > 0) {
+                sampleNearest(series, scrubX / widthPx.toDouble(), history.since, history.to)
+            } else {
+                null
+            }
+        scrubText = scrub?.let { scrubLabel(it, calibrated, zone) }
+        ChartCanvas(
+            history,
+            pot,
+            series,
+            calibrated,
+            window,
+            zone,
+            scrub,
+            onWidth = { widthPx = it },
+            onScrubX = { scrubX = it },
+        )
+    }
+    ChartCaption(
+        scrubText,
+        chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX)),
+    )
+    why?.let { ErrorText(it) }
+}
+
+/** Day, week, month. They stay up while the next window loads: a spinner you
+ * cannot leave is a trap. */
+@Composable
+private fun ChartChips(window: ChartWindow, onWindow: (ChartWindow) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ChartWindow.entries.forEach { w ->
             FilterChip(selected = w == window, onClick = { onWindow(w) }, label = { Text(w.label) })
         }
     }
-    if (history == null) {
-        if (why == null) Text("loading the last ${window.label}…", style = MaterialTheme.typography.bodySmall)
-        why?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-        return
-    }
-    val caption = chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX))
-    // Where the finger is, in pixels, and how wide the canvas is. The
-    // decision itself is scrubbed(), a pure function with a test; this is
-    // only the plumbing. -1 means nothing is touching it.
-    var scrubX by remember { mutableFloatStateOf(-1f) }
-    var widthPx by remember { mutableIntStateOf(0) }
-    var scrubText: String? = null
-    if (history.points.isNotEmpty()) {
-        val calibrated = isCalibrated(pot.dryRaw, pot.wetRaw)
-        val gapS = chartGapS(history.bucketS, board, nextDefault)
-        val series =
-            remember(history, pot.dryRaw, pot.wetRaw, gapS) { chartSeries(history.points, pot.dryRaw, pot.wetRaw, gapS) }
-        val range = chartRange(series, calibrated)
-        val ticksY = yTicks(range, calibrated)
-        val zone = ZoneId.systemDefault()
-        val ticksX =
-            remember(history.since, history.to, zone, window) { windowTicks(window, history.since, history.to, zone) }
-        val scrub =
-            if (scrubX >= 0 && widthPx > 0) {
-                scrubbed(series, scrubX / widthPx.toDouble(), history.since, history.to)
-            } else {
-                null
-            }
-        scrubText = scrub?.let { scrubLabel(it, calibrated, zone) }
-        val primary = MaterialTheme.colorScheme.primary
-        val tertiary = MaterialTheme.colorScheme.tertiary
-        val grid = MaterialTheme.colorScheme.outlineVariant
-        val label = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val measurer = rememberTextMeasurer()
-        Canvas(
-            Modifier.fillMaxWidth()
-                .height(180.dp)
-                .onSizeChanged { widthPx = it.width }
-                // Horizontal only, so dragging the chart never fights the
-                // form scrolling underneath it.
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { scrubX = it.x },
-                        onDragEnd = { scrubX = -1f },
-                        onDragCancel = { scrubX = -1f },
-                    ) { change, _ -> scrubX = change.position.x }
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(onPress = {
-                        scrubX = it.x
-                        tryAwaitRelease()
-                        scrubX = -1f
-                    })
-                },
-        ) {
-            val pad = 2.dp.toPx()
-            val labelH = measurer.measure("00:00", label).size.height
-            val top = labelH.toFloat() // the top value label sits above its gridline
-            val bottom = size.height - labelH - pad // the hour labels sit under the plot
-            val span = (history.to - history.since).coerceAtLeast(1).toFloat()
-            fun x(ts: Long) = (ts - history.since) / span * size.width
-            fun y(v: Double) = (bottom - (v - range.low) / (range.high - range.low) * (bottom - top)).toFloat()
-            for (t in ticksY) drawLine(grid, Offset(0f, y(t.at)), Offset(size.width, y(t.at)), 1f)
-            for (t in ticksX) drawLine(grid, Offset(x(t.ts), top), Offset(x(t.ts), bottom), 1f)
-            val lo = pot.targetLowPct
-            val hi = pot.targetHighPct
-            if (calibrated && lo != null && hi != null && hi > lo) {
-                drawRect(
-                    primary.copy(alpha = 0.12f),
-                    topLeft = Offset(0f, y(hi.toDouble())),
-                    size = Size(size.width, y(lo.toDouble()) - y(hi.toDouble())),
-                )
-            }
-            for (segment in series) {
-                if (segment.size == 1) {
-                    drawCircle(primary, 3.dp.toPx(), Offset(x(segment[0].ts), y(segment[0].value)))
-                    continue
-                }
-                val path = Path()
-                segment.forEachIndexed { i, s ->
-                    if (i == 0) path.moveTo(x(s.ts), y(s.value)) else path.lineTo(x(s.ts), y(s.value))
-                }
-                drawPath(path, primary, style = Stroke(2.dp.toPx()))
-            }
-            pot.lastDose?.sentTs?.takeIf { it in history.since..history.to }?.let { ts ->
-                drawLine(tertiary, Offset(x(ts), top), Offset(x(ts), bottom), 1.dp.toPx())
-            }
-            scrub?.let { s ->
-                drawLine(primary, Offset(x(s.ts), top), Offset(x(s.ts), bottom), 1.dp.toPx())
-                drawCircle(primary, 4.dp.toPx(), Offset(x(s.ts), y(s.value)))
-            }
-            for (t in ticksY) {
-                val text = measurer.measure(t.label, label)
-                drawText(text, topLeft = Offset(pad, y(t.at) - text.size.height))
-            }
-            val now = measurer.measure("now", label)
-            drawText(now, topLeft = Offset(size.width - now.size.width, bottom + pad))
-            for (t in ticksX) { // an hour label that would run into "now" is left out
-                val text = measurer.measure(t.label, label)
-                val left = x(t.ts) + pad
-                if (left + text.size.width + pad < size.width - now.size.width) {
-                    drawText(text, topLeft = Offset(left, bottom + pad))
-                }
-            }
-        }
-    }
-    // Under the finger, the sample's own value and its own time — never an
-    // interpolation, which would be a reading that never happened.
+}
+
+/** Under the chart: what is under the finger while there is one, else what
+ * the curve is made of. The sample's own value and time, never an
+ * interpolation — that would be a reading that never happened. */
+@Composable
+private fun ChartCaption(scrubText: String?, caption: String) {
     if (scrubText != null) {
         Text(scrubText, style = MaterialTheme.typography.bodyMedium)
     } else {
         Text(caption, style = MaterialTheme.typography.bodySmall)
     }
-    why?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 }
 
-/** The button waters the stored pot, and says under itself why it cannot,
- * or where the queued dose has got to. While the dose is queued or sent
- * the slot's "busy" reason stays hidden: that is this form's own command;
- * and "no news" stands alone, since the reason under it would be a guess. */
+@Composable
+private fun ChartCanvas(
+    history: History,
+    pot: Pot,
+    series: List<List<Sample>>,
+    calibrated: Boolean,
+    window: ChartWindow,
+    zone: ZoneId,
+    scrub: Sample?,
+    onWidth: (Int) -> Unit,
+    onScrubX: (Float) -> Unit,
+) {
+    val range = chartRange(series, calibrated)
+    val ticksY = yTicks(range, calibrated)
+    val ticksX =
+        remember(history.since, history.to, zone, window) { windowTicks(window, history.since, history.to, zone) }
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val grid = MaterialTheme.colorScheme.outlineVariant
+    val label = MaterialTheme.typography.labelSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val measurer = rememberTextMeasurer()
+    Canvas(
+        Modifier.fillMaxWidth()
+            .height(180.dp)
+            .onSizeChanged { onWidth(it.width) }
+            // Horizontal only, so dragging the chart never fights the
+            // form scrolling underneath it.
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { onScrubX(it.x) },
+                    onDragEnd = { onScrubX(-1f) },
+                    onDragCancel = { onScrubX(-1f) },
+                ) { change, _ -> onScrubX(change.position.x) }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(onPress = {
+                    onScrubX(it.x)
+                    tryAwaitRelease()
+                    onScrubX(-1f)
+                })
+            },
+    ) {
+        val pad = 2.dp.toPx()
+        val labelH = measurer.measure("00:00", label).size.height
+        val axis =
+            Axis(
+                since = history.since,
+                span = (history.to - history.since).coerceAtLeast(1).toFloat(),
+                range = range,
+                top = labelH.toFloat(), // the top value label sits above its gridline
+                bottom = size.height - labelH - pad, // the hour labels sit under the plot
+                width = size.width,
+            )
+        drawGrid(axis, grid, ticksY, ticksX)
+        if (calibrated) drawBand(axis, primary, pot.targetLowPct, pot.targetHighPct)
+        drawSeries(axis, primary, series)
+        drawMarks(axis, primary, tertiary, pot.lastDose?.sentTs?.takeIf { it in history.since..history.to }, scrub)
+        drawLabels(axis, measurer, label, ticksY, ticksX, pad)
+    }
+}
+
+/** Seconds and values into pixels: the one mapping every part of the drawing
+ * shares, so no two of them can disagree about where a timestamp is. */
+private class Axis(
+    val since: Long,
+    val span: Float,
+    val range: YRange,
+    val top: Float,
+    val bottom: Float,
+    val width: Float,
+) {
+    fun x(ts: Long): Float = (ts - since) / span * width
+
+    fun y(v: Double): Float = (bottom - (v - range.low) / (range.high - range.low) * (bottom - top)).toFloat()
+}
+
+private fun DrawScope.drawGrid(axis: Axis, colour: Color, ticksY: List<Tick>, ticksX: List<TimeTick>) {
+    for (t in ticksY) drawLine(colour, Offset(0f, axis.y(t.at)), Offset(size.width, axis.y(t.at)), 1f)
+    for (t in ticksX) drawLine(colour, Offset(axis.x(t.ts), axis.top), Offset(axis.x(t.ts), axis.bottom), 1f)
+}
+
+/** The pot's target band, behind the curve. Only a calibrated pot has one:
+ * raw counts and a percentage are not the same axis. */
+private fun DrawScope.drawBand(axis: Axis, colour: Color, low: Int?, high: Int?) {
+    if (low == null || high == null || high <= low) return
+    drawRect(
+        colour.copy(alpha = 0.12f),
+        topLeft = Offset(0f, axis.y(high.toDouble())),
+        size = Size(size.width, axis.y(low.toDouble()) - axis.y(high.toDouble())),
+    )
+}
+
+/** The curve, one path per segment. A segment holding one sample is a dot:
+ * a polyline through a single point draws nothing at all. */
+private fun DrawScope.drawSeries(axis: Axis, colour: Color, series: List<List<Sample>>) {
+    for (segment in series) {
+        if (segment.size == 1) {
+            drawCircle(colour, 3.dp.toPx(), Offset(axis.x(segment[0].ts), axis.y(segment[0].value)))
+            continue
+        }
+        val path = Path()
+        segment.forEachIndexed { i, s ->
+            if (i == 0) path.moveTo(axis.x(s.ts), axis.y(s.value)) else path.lineTo(axis.x(s.ts), axis.y(s.value))
+        }
+        drawPath(path, colour, style = Stroke(2.dp.toPx()))
+    }
+}
+
+/** The two hairlines over the curve: where the last dose went in, and where
+ * the finger is. */
+private fun DrawScope.drawMarks(axis: Axis, colour: Color, doseColour: Color, doseTs: Long?, scrub: Sample?) {
+    doseTs?.let { drawLine(doseColour, Offset(axis.x(it), axis.top), Offset(axis.x(it), axis.bottom), 1.dp.toPx()) }
+    scrub?.let {
+        drawLine(colour, Offset(axis.x(it.ts), axis.top), Offset(axis.x(it.ts), axis.bottom), 1.dp.toPx())
+        drawCircle(colour, 4.dp.toPx(), Offset(axis.x(it.ts), axis.y(it.value)))
+    }
+}
+
+/** The value axis, "now" at the right edge, and as many time labels as fit
+ * without running into it. */
+private fun DrawScope.drawLabels(
+    axis: Axis,
+    measurer: TextMeasurer,
+    style: TextStyle,
+    ticksY: List<Tick>,
+    ticksX: List<TimeTick>,
+    pad: Float,
+) {
+    for (t in ticksY) {
+        val text = measurer.measure(t.label, style)
+        drawText(text, topLeft = Offset(pad, axis.y(t.at) - text.size.height))
+    }
+    val now = measurer.measure("now", style)
+    drawText(now, topLeft = Offset(size.width - now.size.width, axis.bottom + pad))
+    for (t in ticksX) { // an hour label that would run into "now" is left out
+        val text = measurer.measure(t.label, style)
+        val left = axis.x(t.ts) + pad
+        if (left + text.size.width + pad < size.width - now.size.width) {
+            drawText(text, topLeft = Offset(left, axis.bottom + pad))
+        }
+    }
+}
+
+/** Waters the stored pot, and says under itself why it cannot, or where the
+ * queued dose has got to. The slot's "busy" reason stays hidden while the
+ * dose is queued or sent — that busy slot is this form's own command. */
 @Composable
 private fun WaterRow(screen: Screen.Pot, pot: Pot, reason: String?, model: GardenViewModel) {
     val status = screen.watering?.let { model.currentWaterStatus(screen) ?: WaterStatus.Queued }
@@ -447,16 +513,14 @@ private fun WaterRow(screen: Screen.Pot, pot: Pot, reason: String?, model: Garde
         )
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Button(onClick = { askWater = true }, enabled = reason == null && !screen.saving && !following) {
+        Button(onClick = { askWater = true }, enabled = reason == null && !screen.busy && !following) {
             Text(pot.doseMl?.let { "Water $it ml" } ?: "Water")
         }
         status?.let {
             Text(waterLine(it, pot.controller?.toString() ?: "?"), style = MaterialTheme.typography.bodySmall)
         }
         if (reason != null && !ownWords) Text(reason, style = MaterialTheme.typography.bodySmall)
-        screen.waterRefused?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
+        screen.waterRefused?.let { ErrorText(it) }
     }
 }
 
@@ -499,33 +563,30 @@ private fun Form(
     model: GardenViewModel,
 ) {
     val draft = screen.draft
-    // A stored pot's nickname is editable too: the id is the key, so this
-    // field renames rather than creating a second pot.
+    // The id is the key, so editing the nickname here renames the pot
+    // rather than creating a second one.
     OutlinedTextField(
         value = draft["name"].orEmpty(),
         onValueChange = { model.edit("name", it) },
         label = { Text(NAME_FIELD.label) },
         singleLine = true,
-        enabled = !screen.saving,
+        enabled = !screen.busy,
         trailingIcon = { Explain(NAME_FIELD, model) },
         modifier = Modifier.fillMaxWidth(),
     )
     if (collision) {
-        Text(
+        ErrorText(
             if (screen.id == null) {
                 "${tokenize(draft["name"].orEmpty())} already exists — open it from the list"
             } else {
                 "${tokenize(draft["name"].orEmpty())} is another pot's name"
-            },
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall,
+            }
         )
     }
     for (field in POT_FIELDS) {
         when (field.key) {
-            // Three bare chips with nothing above them said neither what
-            // they were nor that manual, learning and auto are three
-            // different amounts of trust.
+            // The label above the chips says both what they are and that
+            // manual, learning and auto are three different amounts of trust.
             "mode" -> {
                 Labelled(field, model)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -538,8 +599,8 @@ private fun Form(
                     }
                 }
             }
-            // Two words, so chips rather than a dropdown: both are visible
-            // at once and burying a plant is worth seeing before tapping.
+            // Chips, not a dropdown: both words visible at once, since
+            // burying a plant is worth seeing before tapping.
             "status" -> {
                 Labelled(field, model)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -575,7 +636,7 @@ private fun Form(
                     )
                     Button(
                         onClick = model::startCalibration,
-                        enabled = screen.id != null && !screen.saving && !dirty && live,
+                        enabled = screen.id != null && !screen.busy && !dirty && live,
                     ) {
                         Text("Recalibrate")
                     }
@@ -585,9 +646,8 @@ private fun Form(
                 SpeciesPanel(screen, model)
             }
             "wet_raw" -> Unit
-            // A closed set is picked, never typed. Free text on the plant
-            // kind used to look saved and match nothing, which is the one
-            // way to be twenty points out without a word of warning.
+            // A closed set is picked, never typed: free text here can silently
+            // drift the water target with no warning.
             else ->
                 if (field.input == Input.PICK) {
                     Picker(field, draft, model)
@@ -620,23 +680,20 @@ private fun ValueField(
 private fun keyboardFor(input: Input): KeyboardType =
     when (input) {
         Input.INTEGER -> KeyboardType.Number
-        // A measurement in centimetres is allowed a decimal point, and a
-        // keyboard without one makes 14.5 impossible to type.
+        // Centimetre measurements need a decimal point, or 14.5 is untypeable.
         Input.DECIMAL -> KeyboardType.Decimal
         // PICK never reaches a keyboard; TEXT is the only one left that does.
         else -> KeyboardType.Text
     }
 
-/** One closed set as a dropdown. The read-only field shows the LABEL and
- * the draft holds the wire word, so renaming a choice on screen can never
- * become a wire change.
+/** One closed set as a dropdown. The read-only field shows the LABEL while
+ * the draft holds the wire word, so renaming a choice on screen never
+ * becomes a wire change.
  *
- * "Not said" is the first entry and a real answer, not a placeholder: for
- * the plant kind it is the band an unlabelled plant already has, and for
- * the soil it is ordinary potting compost, which is what every other value
- * is measured against. It writes an empty draft value, which the wire
- * cannot send — so it clears nothing that was already stored, and the form
- * says so under Save rather than pretending otherwise. */
+ * "Not said" is a real answer, not a placeholder — the unlabelled band for
+ * plant kind, ordinary potting compost for soil. It writes an empty draft
+ * value, which the wire cannot send, so it clears nothing already stored;
+ * the form says so under Save rather than pretending otherwise. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Picker(field: Field, draft: Map<String, String>, model: GardenViewModel) {

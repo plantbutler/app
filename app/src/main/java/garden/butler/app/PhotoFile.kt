@@ -8,11 +8,14 @@ import androidx.exifinterface.media.ExifInterface
 import java.io.ByteArrayOutputStream
 import java.io.File
 
+/** The bitmap half of a pot's photographs, Android-only: where the camera
+ * writes, and shrinkJpeg, which decodes, turns upright, caps the long edge
+ * and re-encodes. The words and decisions around it are in Photos.kt. */
+
 /** A photograph downscaled and re-encoded, ready to go up. */
 data class Shrunk(val jpeg: ByteArray, val w: Int, val h: Int) {
-    // A ByteArray in a data class has reference equality by default, which
-    // is not what anybody reading `==` here would expect. Nothing compares
-    // these, so they are excluded rather than deep-compared.
+    // A ByteArray in a data class compares by reference, not contents.
+    // Nothing compares these, so identity equality is left as is.
     override fun equals(other: Any?) = this === other
 
     override fun hashCode() = System.identityHashCode(this)
@@ -23,18 +26,18 @@ data class Shrunk(val jpeg: ByteArray, val w: Int, val h: Int) {
  * only copy that matters is on the butler. */
 fun cameraFile(context: Context): File {
     val dir = File(context.cacheDir, "camera").apply { mkdirs() }
-    // One name, reused. The full-size original is worth nothing the moment
-    // it has been shrunk and sent, and a directory of them would be the
-    // several megabytes each that the pitch says to keep off the phone.
+    // One name, reused. The full-size original is worth nothing once it
+    // has been shrunk and sent, and a directory of them would be the
+    // several megabytes each this is meant to keep off the phone.
     return File(dir, "capture.jpg")
 }
 
 /** Decode, turn the right way up, cap the long edge, re-encode.
  *
- * All of it before anything is uploaded, per the pitch: the NAS volume and
- * its backup were never sized for phone photographs at full size. Decoding
- * is subsampled first, so a twelve-megapixel picture never arrives whole in
- * memory on the way to being 1600 pixels wide.
+ * All of it before anything is uploaded: the NAS volume and its backup were
+ * never sized for phone photographs at full size. Decoding is subsampled
+ * first, so a twelve-megapixel picture never arrives whole in memory on the
+ * way to being 1600 pixels wide.
  *
  * Null when the file cannot be read as an image at all — a camera app that
  * was cancelled, or a cache the system emptied between the two.
@@ -61,15 +64,13 @@ fun shrinkJpeg(context: Context, uri: Uri, cap: Int = PHOTO_LONG_EDGE): Shrunk? 
             if (decoded == null) {
                 null
             } else {
-                // A phone camera writes the sensor's orientation into EXIF
-                // rather than rotating the pixels. Re-encoding drops the
-                // tag, so without this every picture taken in portrait
-                // would come back on its side, for good.
+                // The camera writes orientation into EXIF, not the pixels;
+                // re-encoding drops the tag, so this must run first or every
+                // portrait picture comes back on its side, for good.
                 val upright = turned(context, uri, decoded)
-                // Each step can hold a whole bitmap, so the one before it
-                // is let go as soon as it is not the one being used. Three
-                // live at once is the difference between fitting in a
-                // phone's heap and not.
+                // Each step can hold a whole bitmap, so the previous one is
+                // recycled as soon as it's unused — three alive at once is
+                // the difference between fitting in a phone's heap and not.
                 if (upright !== decoded) decoded.recycle()
                 val (w, h) = fitted(upright.width, upright.height, cap)
                 val scaled =
@@ -84,10 +85,9 @@ fun shrinkJpeg(context: Context, uri: Uri, cap: Int = PHOTO_LONG_EDGE): Shrunk? 
             }
         }
     } catch (why: OutOfMemoryError) {
-        // Its own clause, and not folded into the one below, because
-        // OutOfMemoryError is an Error and not an Exception: a picture too
-        // big for the heap is the one failure this whole function exists to
-        // survive, and catching Exception alone would let it crash the app.
+        // Its own clause: OutOfMemoryError is an Error, not an Exception,
+        // and a picture too big for the heap is the one failure this
+        // function exists to survive — catching Exception alone would miss it.
         null
     } catch (why: Exception) {
         // A file that vanished, a camera app that wrote nothing, anything

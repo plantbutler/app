@@ -21,16 +21,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 
-/** The species lookup and the target-band offer: the two places where the
- * butler says something about the plant rather than about the wire.
- *
- * Neither writes anything on its own. The lookup puts words and pictures on
- * screen; the offer needs a tap on Apply, which is an ordinary pot edit.
- */
+/** The species lookup and the target-band offer: the two places the butler
+ * says something about the plant rather than the wire. Neither writes
+ * anything on its own — the offer needs a tap on Apply, an ordinary pot edit. */
 @Composable
 fun SpeciesPanel(screen: Screen.Pot, model: GardenViewModel) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = model::lookUpSpecies, enabled = !screen.lookingUp && !screen.saving) {
+        TextButton(onClick = model::lookUpSpecies, enabled = !screen.lookingUp && !screen.busy) {
             Text("Look up")
         }
         if (screen.lookingUp) Text("asking…", style = MaterialTheme.typography.bodySmall)
@@ -55,10 +52,8 @@ fun SpeciesPanel(screen: Screen.Pot, model: GardenViewModel) {
         }
     }
     Text(answer.note, style = MaterialTheme.typography.bodySmall)
-    // The kind the family suggests, when the form already holds a different
-    // one. An empty field was filled the moment the answer landed; this is
-    // the other half, and it is a tap rather than an overwrite because what
-    // is in the field is a human's answer.
+    // The family's suggested kind, offered as a tap rather than an overwrite,
+    // since a kind already in the field is a human's answer.
     suggestedKind(screen.draft, answer.kind)?.let { kind ->
         val label = PLANT_KINDS.firstOrNull { it.wire == kind }?.label ?: kind
         TextButton(onClick = { model.useKind(kind) }) { Text("Set kind to $label") }
@@ -98,9 +93,8 @@ private fun Thumbnail(url: String?, name: String) {
     )
 }
 
-/** The offered band. Apply is the approval the pitch asks for and nothing
- * else happens without it; Not now is remembered against these numbers, so
- * a repot or a change of season asks again. */
+/** The offered band. Apply is the only thing that writes anything; Not now
+ * is remembered against these numbers, so a repot or a change of season asks again. */
 @Composable
 fun AdviceCard(advice: Advice, enabled: Boolean, apply: () -> Unit, dismiss: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {

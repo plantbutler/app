@@ -6,7 +6,7 @@ package garden.butler.app
  */
 
 /** The command this form queued, and the phone clock when. */
-data class Issued(val id: Long, val ts: Long)
+data class QueuedDose(val id: Long, val ts: Long)
 
 /** The board collects a queued command on its next report and acks on the
  * one after: two default intervals plus slack is when to stop asking. */
@@ -77,7 +77,7 @@ sealed interface WaterStatus {
  * saying Queued rather than "gone". nowS is the phone clock, the same one
  * that stamped issued.ts. */
 fun waterStatus(
-    issued: Issued,
+    issued: QueuedDose,
     pot: Pot?,
     controller: ControllerHealth?,
     nowS: Long,
@@ -113,7 +113,7 @@ fun waterLine(status: WaterStatus, controller: String): String =
     }
 
 /** Whether the screen keeps polling for the issued command's fate. */
-fun stillFollowing(issued: Issued?, status: WaterStatus?, nowS: Long): Boolean {
+fun stillFollowing(issued: QueuedDose?, status: WaterStatus?, nowS: Long): Boolean {
     if (issued == null) return false
     val open = status == null || status == WaterStatus.Queued || status == WaterStatus.Sent
     return open && nowS - issued.ts <= FOLLOW_MAX_S
@@ -125,10 +125,10 @@ fun stillFollowing(issued: Issued?, status: WaterStatus?, nowS: Long): Boolean {
 fun staleLine(cachedAtS: Long, nowS: Long): String =
     "the butler is not answering — this is what it last said, ${agoText(cachedAtS, nowS)}"
 
-/** The one confirmation the pitch allows: what is about to happen and what
- * the rules will make of it. Nothing about what might go wrong — a failure
- * that has not happened is noise, and the status line under the button says
- * so if and when it does. */
+/** The one confirmation shown: what is about to happen and what the rules
+ * will make of it. Nothing about what might go wrong — a failure that has
+ * not happened is noise, and the status line under the button says so if
+ * and when it does. */
 fun waterDialogText(pot: Pot): String =
     "Water ${pot.name} with ${pot.doseMl ?: "?"} ml on " +
         "${pot.controller?.let { boardName(it) } ?: "?"} outlet " +

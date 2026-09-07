@@ -130,7 +130,7 @@ class BackendWireTest {
             assertEquals("too_little", answer.doses[0].verdict)
             assertEquals("basil", answer.doses[0].potName)
             // The unattributable row decodes as itself, not as a failure.
-            assertNull(answer.doses[1].pot)
+            assertNull(answer.doses[1].potName)
             assertEquals("expired", answer.doses[1].state)
         }
 
@@ -213,9 +213,9 @@ class BackendWireTest {
     @Test
     fun `history percent-encodes the pot id, as doses does`() =
         withServer { server, backend ->
-            // A minted `pot-xxxxxx` carries nothing to encode, so the encoder
-            // is here for the same reason doses' is: the two readers must
-            // agree about what an id looks like, and neither gets to assume.
+            // A minted `pot-xxxxxx` carries nothing to encode; this exists so
+            // history and doses agree on what an id looks like, neither
+            // assuming.
             server.enqueue(MockResponse().setBody("""{"pot": "a+b", "points": []}"""))
             backend.history("a+b", 24, 300)
             assertEquals("/history?pot=a%2Bb&hours=24&bucket_s=300", server.takeRequest().path)

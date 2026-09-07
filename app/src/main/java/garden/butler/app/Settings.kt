@@ -1,3 +1,4 @@
+// The address and the token: what makes each wrong, and where they are kept.
 package garden.butler.app
 
 import android.content.Context
@@ -5,33 +6,29 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-/** Where the butler is and what it accepts.
- *
- * Not a build constant since 2026-09-04: it is asked for on first start and
- * kept on the device, so one APK installs on a second phone, a moved NAS is
- * a typed line rather than a rebuild, and an artifact carries no token.
+/** Where the butler is and what it accepts. Asked for on first start and
+ * kept on the device rather than compiled in, so one APK installs on a
+ * second phone, a moved NAS is a typed line rather than a rebuild, and the
+ * artifact carries no token.
  */
 data class ButlerConfig(val url: String, val token: String) {
-    /** Half a config is no config: an address with no token would start the
-     * app into a garden that refuses every write, which reads as the butler
-     * being broken rather than as a question nobody finished answering. */
+    /** Half a config is no config: an address with no token starts the app
+     * into a garden that refuses every write, which reads as a broken
+     * butler rather than as a question nobody finished answering. */
     val complete: Boolean
         get() = url.isNotEmpty() && token.isNotEmpty()
 
-    /** Never the token. The generated toString of a data class is the
-     * shortest path there is from a secret to a crash report. */
+    /** Never the token: a data class's generated toString is the shortest
+     * path from a secret to a crash report. */
     override fun toString(): String = "ButlerConfig(url=$url, token=***)"
 }
 
 private val SCHEME = Regex("^[A-Za-z][A-Za-z0-9+.\\-]*://")
 
-/** What somebody typed, as an address.
- *
- * A LAN or tailnet address is typed without a scheme far more often than
- * with one, and cleartext has to keep working — the laptop backend is plain
- * HTTP on a LAN address and the NAS is plain HTTP on the tailnet — so a
- * missing scheme becomes http and never https. Typing https is allowed;
- * being made to is not.
+/** What somebody typed, as an address. A missing scheme becomes http and
+ * never https: the backend is plain HTTP on the LAN and on the tailnet, so
+ * cleartext has to keep working. Typing https is allowed; being made to is
+ * not.
  */
 fun normaliseUrl(typed: String): String {
     val trimmed = typed.trim()
@@ -54,25 +51,25 @@ fun urlProblem(typed: String): String? {
         return "$scheme:// is not something this app speaks — http:// or https://"
     }
     // OkHttp's own parser, because it is the one that will have to dial it:
-    // an address this app accepts and cannot then use is the worst of the
-    // three answers, since it looks like the butler's fault.
+    // an address this app accepts and then cannot use looks like the
+    // butler's fault.
     val parsed =
         url.toHttpUrlOrNull()
             ?: return "that is not an address — it should look like 100.x.y.z:9380"
-    // Every path is appended to this address, so a query or a fragment
-    // would end up in front of the path rather than after it:
-    // "http://x/?t=1" plus "/hello" asks for "/" with a mangled query,
-    // succeeds as far as OkHttp is concerned, and fails as "not your
-    // butler" with nothing pointing at the real cause.
+    // Every path is appended to this address, so a query or a fragment ends
+    // up in front of the path rather than after it: http://x/?t=1 plus
+    // /hello asks for / with a mangled query, succeeds as far as OkHttp is
+    // concerned, and fails as "not your butler" with nothing pointing at
+    // the real cause.
     if (parsed.encodedQuery != null || parsed.encodedFragment != null) {
         return "leave off anything after ? or # — this is where the butler is, not a link to a page"
     }
     return null
 }
 
-/** Why that is not a token, or null. The backend compares it byte for byte,
- * so a stray space really is a wrong token — and saying so beats a 401 the
- * user cannot account for. */
+/** Why that is not a token, or null. The backend compares byte for byte, so
+ * a stray space really is a wrong token — and saying so beats a 401 nobody
+ * can account for. */
 fun tokenProblem(typed: String): String? {
     val token = typed.trim()
     if (token.isEmpty()) return "type the butler's token too"
@@ -80,10 +77,9 @@ fun tokenProblem(typed: String): String? {
         return "that token has a space in it — check what was pasted"
     }
     // Anything outside printable ASCII cannot go in an HTTP header at all,
-    // and OkHttp's refusal quotes the offending value back — which for this
-    // value would put the token on the screen, in front of whoever is
-    // holding the phone. The butler's token is hex, so nothing real is
-    // turned away by this.
+    // and OkHttp's refusal quotes the offending value back — which here
+    // would put the token on the screen. The butler's token is hex, so
+    // nothing real is turned away by this.
     if (token.any { it < ' ' || it > '~' }) {
         return "that token has a character an HTTP header cannot carry — a smart quote or " +
             "an accent, most likely; check what was pasted"
@@ -91,12 +87,10 @@ fun tokenProblem(typed: String): String? {
     return null
 }
 
-/** What an address said when it was asked whether it is a butler.
- *
- * Four answers rather than one failure. "Nothing is listening there" and
- * "that is not your token" are different mistakes, the user can only have
- * made one of them, and only one of them is fixed by retyping the token —
- * telling them apart in words is most of what this screen is for.
+/** What an address said when it was asked whether it is a butler. Four
+ * answers rather than one failure: nothing listening there and a refused
+ * token are different mistakes, and only one of them is fixed by retyping
+ * the token.
  */
 sealed interface Probe {
     data class Butler(val version: String) : Probe
@@ -112,13 +106,13 @@ sealed interface Probe {
 
 /** `GET /hello`, classified. Pure, so every branch has a test that does not
  * need a socket. */
-fun readHello(code: Int, body: String): Probe {
+fun classifyHello(code: Int, body: String): Probe {
     val text = body.trim()
     return when {
         code == 401 -> Probe.WrongToken
-        // The route arrived in backend 0.13.0. Before that a butler answers
-        // 404 here, which is indistinguishable from another service on the
-        // port — so the sentence has to own up to both.
+        // An old enough butler has no /hello and answers 404 here, which is
+        // indistinguishable from another service on the port — so the
+        // sentence has to own up to both.
         code == 404 ->
             Probe.NotTheButler(
                 "it has no /hello — a butler older than 0.13.0, or another service on that port",
@@ -147,12 +141,10 @@ interface ConfigStore {
     fun write(config: ButlerConfig)
 }
 
-/** The address and the token on this device.
- *
- * The encrypted store rather than plain preferences, because the token is a
- * secret at rest on a phone: plain preferences are a world-readable file to
- * anything with root or a backup of it, and this is the one secret the app
- * holds. Nothing here ever logs or stringifies the token.
+/** The address and the token on this device. The encrypted store rather
+ * than plain preferences, because plain preferences are a readable file to
+ * anything with root or a backup of it, and the token is the one secret the
+ * app holds. Nothing here ever logs or stringifies it.
  */
 class EncryptedConfigStore(
     private val context: Context,
@@ -177,9 +169,9 @@ class EncryptedConfigStore(
         } catch (why: Exception) {
             // The keystore entry can go — a restore onto another device, a
             // wiped keystore — and then this file can never be decrypted
-            // again. Throwing would be an app that never starts; the
-            // undecryptable store is dropped instead and the setup screen
-            // asks again, which is the one thing the user can act on.
+            // again. Throwing would be an app that never starts, so the
+            // undecryptable store is dropped and the setup screen asks
+            // again, which is the one thing the user can act on.
             forget()
             null
         }

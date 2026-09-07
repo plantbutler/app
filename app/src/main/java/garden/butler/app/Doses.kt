@@ -27,9 +27,9 @@ fun flowedShort(dose: Dose): Boolean {
 }
 
 /** Why this row is worth a second look, or null when it is an ordinary
- * dose. The pitch's own rabbit hole: the interesting row is the one that
- * expired, was never acked, or flowed short, and it has to read
- * differently rather than be filtered out. */
+ * dose: the interesting row is the one that expired, was never acked, or
+ * flowed short, and it has to read differently rather than be filtered
+ * out. */
 fun doseTrouble(dose: Dose): String? =
     when {
         dose.state == "expired" ->
@@ -62,7 +62,7 @@ fun doseHistoryLine(dose: Dose, nowS: Long): String {
 /** Whose dose it was, for the garden-wide list. A dose no mapping window
  * claims says so instead of borrowing the name of whoever hangs on that
  * hose now — which is the whole reason the windows exist. */
-fun doseWho(dose: Dose): String =
+fun doseOwnerLine(dose: Dose): String =
     dose.potName
         ?: if (dose.sentTs == null) {
             // Never handed out, so there is nothing to attribute yet —

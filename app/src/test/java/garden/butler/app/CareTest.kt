@@ -31,8 +31,8 @@ class CareTest {
 
     @Test
     fun `a plant the source knows but has no numbers for has no line either`() {
-        // Dracaena trifasciata: resolves, and every growth field null. The
-        // ordinary houseplant answer, and it must not render as an empty row.
+        // A found species with every growth field null is the ordinary
+        // houseplant answer, and must not render as an empty row.
         assertNull(careLine(care()))
     }
 
@@ -74,10 +74,10 @@ class CareTest {
 
     @Test
     fun `a renamed plant is worth a button and a matching one is not`() {
-        val renamed = SpeciesAnswer(accepted = "Dracaena trifasciata", matched = "exact")
+        val renamed = SpeciesAnswer(accepted = "Dracaena trifasciata")
         assertEquals("Dracaena trifasciata", betterName(renamed, "Sansevieria_trifasciata"))
-        val same = SpeciesAnswer(accepted = "Ocimum basilicum", matched = "exact")
+        val same = SpeciesAnswer(accepted = "Ocimum basilicum")
         assertNull(betterName(same, "ocimum_basilicum"))
-        assertNull(betterName(SpeciesAnswer(matched = "none"), "zzqq"))
+        assertNull(betterName(SpeciesAnswer(), "zzqq"))
     }
 }

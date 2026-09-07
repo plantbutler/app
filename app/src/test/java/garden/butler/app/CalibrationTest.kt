@@ -75,10 +75,10 @@ class CalibrationTest {
 
     @Test
     fun `the dry endpoint cannot be taken from readings that predate the instruction`() {
-        // The regression the median introduced: the sensor is still in soil
-        // while the board proves it sped up, and those soil readings used to
-        // be carried into the air step. A dry calibrated against soil makes a
-        // wet pot read as parched, and the rules water it.
+        // The sensor is still in soil while the board proves it sped up;
+        // those soil readings must not carry into the air step, because a
+        // dry endpoint calibrated against soil makes a wet pot read as
+        // parched, and the rules would water it.
         var s: CalState = calStart(null, 1000, 60)
         s = calStep(s, seen(8000, 1010), 1010) // still in soil
         s = calStep(s, seen(8100, 1015), 1015) // still in soil; the board obeyed
@@ -89,8 +89,8 @@ class CalibrationTest {
         val water = calStep(s, CalEvent.Tap, 1022) as CalState.Water
         assertEquals(13000, water.dry) // not 8100, which is soil
 
-        // What the old carry-over would have cost: a pot at raw 8500 reads
-        // half wet on a correct scale and bone dry on the contaminated one.
+        // The stakes: a pot at raw 8500 reads half wet on the correct dry
+        // endpoint (13000) and bone dry on the contaminated one (8100).
         assertEquals(50, moisturePct(8500, 13000, 4000))
         assertEquals(0, moisturePct(8500, 8100, 4000))
     }
@@ -202,8 +202,8 @@ class CalibrationTest {
 
     @Test
     fun `the endpoint is the median of the reports this step has seen`() {
-        // One noisy sample used to set a pot's whole scale until somebody
-        // recalibrated. The median throws it away.
+        // A noisy single tap would otherwise set a pot's whole scale until
+        // somebody recalibrates. The median throws it away.
         val noisy =
             air(
                 since = 1000,
@@ -225,8 +225,8 @@ class CalibrationTest {
 
     @Test
     fun `three samples are three reports, never one report counted three times`() {
-        // The pitch's rabbit hole. `remember` keeps readings distinct by
-        // readTs, so polling the same report over and over leaves one.
+        // `remember` keeps readings distinct by readTs, so polling the same
+        // report over and over leaves one.
         var s: CalState = air(since = 1000)
         repeat(3) { s = calStep(s, CalEvent.Seen(12000, 1005), 1005 + it.toLong()) }
         assertEquals(1, tapSamples(s).size)

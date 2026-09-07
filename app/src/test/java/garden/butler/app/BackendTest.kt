@@ -74,7 +74,6 @@ class BackendTest {
         val (latched, plain, learning) = health.controllers
         assertEquals(Latch(since = 4, reason = "contra"), latched.latched)
         assertEquals(3L, latched.lastRefill)
-        assertEquals("contra" to 4L, latched.err to latched.errTs)
         assertEquals(0, latched.retired)
         assertEquals(2L, latched.posOkSeen)
         assertEquals(4180, latched.tankMl)
@@ -83,11 +82,11 @@ class BackendTest {
         assertEquals(1, latched.over)
         assertNull(plain.latched)
         assertNull(plain.lastRefill)
-        assertNull(plain.err)
         assertEquals(0, plain.retired)
         assertNull(plain.posOkSeen)
         assertNull(plain.tankMl)
-        // Absent is null, not 0: a 0.18.0 backend has no tank to be learning.
+        // Absent is null, not 0: a backend that never sends the key has no
+        // tank to be learning yet.
         assertNull(plain.tankSamples)
         assertEquals(0, plain.pumpedMl)
         assertEquals(0, plain.over)
@@ -114,17 +113,16 @@ class BackendTest {
 
     @Test
     fun `the counter and over count from the origin, which is the tap or a rise after a drain`() {
-        // The origin is the backend's: the latest tap that saw the float, or
-        // the float's rise once it went empty after that tap and full again
-        // with nobody tapping. A tap made at empty keeps the tap when the
-        // pour reaches the float (no drop after it); a tank run down and
-        // refilled by someone who forgot to tap restarts the counter at the
-        // rise while last_refill still names the old tap. The app shows what
-        // it is sent and derives neither field from last_refill: the same
-        // old tap sits beside a counter running from it and one restarted
-        // at a rise after it, and a row that never had a tap — which the
-        // backend counts nothing from, but that is its rule to change —
-        // parses no differently.
+        // The origin is the backend's own: the latest tap that saw the
+        // float, or the float's rise once it went empty after that tap and
+        // came back full with nobody tapping. A tap made at empty keeps the
+        // tap once the pour reaches the float (no drop after it); a tank
+        // drained and refilled by someone who forgot to tap restarts the
+        // counter at the rise while last_refill still names the old tap.
+        // The app shows only what it is sent and derives neither field from
+        // the other, so the same old tap can sit beside a counter running
+        // from it or one restarted at a rise after it, and a row that never
+        // had a tap parses no differently.
         val (atEmpty, untapped, neverTapped) =
             parseHealth(
                 """{"ok": true, "controllers": [
@@ -185,7 +183,7 @@ class BackendTest {
         assertEquals("learning", pot.mode)
         assertEquals(Proposal(17, 100, 10, 1788291000), pot.proposal)
         assertEquals(
-            LastDose(16, 100, 10, 96, "acked", "manual", 1788200000, 1788200100, "too_much"),
+            LastDose(16, 100, 96, "acked", "manual", 1788200000, 1788200100, "too_much"),
             pot.lastDose,
         )
     }
@@ -237,7 +235,6 @@ class BackendTest {
             """.trimIndent()
 
         val history = parseHistory(body)
-        assertEquals("pot-3f9a21", history.pot)
         assertEquals(1788205474, history.since)
         assertEquals(1788291874, history.to)
         assertEquals(300, history.bucketS)
@@ -250,7 +247,6 @@ class BackendTest {
         val history =
             parseHistory("""{"pot": "pot-3f9a21", "since": 1, "to": 2, "bucket_s": 300, "points": []}""")
         assertEquals(emptyList(), history.points)
-        assertEquals("pot-3f9a21", history.pot)
     }
 
     @Test

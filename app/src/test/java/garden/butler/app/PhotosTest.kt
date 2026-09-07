@@ -11,7 +11,7 @@ class PhotosTest {
         Photo(id = id, ts = ts, bytes = 400_000, species = species, missing = missing)
 
     // ------------------------------------------------------------------ //
-    // Shrinking, which is where the pitch's first rabbit hole lives
+    // Shrinking
 
     @Test
     fun `a twelve megapixel picture is subsampled, not loaded whole`() {
@@ -75,15 +75,15 @@ class PhotosTest {
     @Test
     fun `the strip runs oldest first, the wire newest first`() {
         val wire = listOf(photo("c", 300), photo("b", 200), photo("a", 100))
-        assertEquals(listOf("a", "b", "c"), strip(wire).map { it.id })
+        assertEquals(listOf("a", "b", "c"), oldestFirst(wire).map { it.id })
     }
 
     @Test
     fun `two pictures in the same second still have an order`() {
         // Otherwise the strip shuffles itself between refreshes.
         val wire = listOf(photo("b", 100), photo("a", 100))
-        assertEquals(listOf("a", "b"), strip(wire).map { it.id })
-        assertEquals(listOf("a", "b"), strip(wire.reversed()).map { it.id })
+        assertEquals(listOf("a", "b"), oldestFirst(wire).map { it.id })
+        assertEquals(listOf("a", "b"), oldestFirst(wire.reversed()).map { it.id })
     }
 
     @Test
@@ -197,9 +197,7 @@ class PhotosTest {
                                {"id": "photo-deadbeef", "ts": 1756000000, "bytes": 1,
                                 "missing": true}]}""",
             )
-        assertEquals("pot-1", answer.pot)
         assertEquals(2, answer.photos.size)
-        assertEquals(1600, answer.photos[0].w)
         assertEquals("Ocimum_basilicum", answer.photos[0].species)
         assertTrue(answer.photos[1].missing)
         assertNull(answer.photos[1].species)

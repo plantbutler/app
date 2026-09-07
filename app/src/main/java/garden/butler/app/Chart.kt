@@ -23,10 +23,6 @@ enum class ChartWindow(val hours: Int, val bucketS: Int, val label: String) {
     DAY(24, HISTORY_BUCKET_S, "day"),
     WEEK(24 * 7, 1800, "week"),
     MONTH(24 * 30, 3600, "month"),
-    ;
-
-    val points: Int
-        get() = hours * 3600 / bucketS
 }
 
 data class Sample(val ts: Long, val value: Double)
@@ -155,7 +151,7 @@ fun windowTicks(window: ChartWindow, since: Long, to: Long, zone: ZoneId): List<
 /** What the finger is on: the sample nearest the touched fraction of the
  * width, and null when the chart has no points to be near. The fraction,
  * not a pixel, so this stays a pure decision the tests can make. */
-fun scrubbed(series: List<List<Sample>>, fraction: Double, since: Long, to: Long): Sample? {
+fun sampleNearest(series: List<List<Sample>>, fraction: Double, since: Long, to: Long): Sample? {
     val samples = series.flatten()
     if (samples.isEmpty()) return null
     val at = since + (to - since) * fraction.coerceIn(0.0, 1.0)

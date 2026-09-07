@@ -19,7 +19,7 @@ private fun controller(
 private fun dose(id: Long, state: String, flowMl: Int? = null) =
     LastDose(id, ml = 100, flowMl = flowMl, state = state)
 
-private val issued = Issued(17, ts = 1000)
+private val issued = QueuedDose(17, ts = 1000)
 
 class WaterTest {
     @Test

@@ -1,3 +1,4 @@
+// The wire: what the backend answers with, and the one class that dials it.
 package garden.butler.app
 
 import java.io.IOException
@@ -11,11 +12,11 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-/** What the backend's GET /pots and GET /health answer, no more.
+/** What GET /pots and GET /health answer, no more.
  *
- * Unknown keys are ignored on purpose, mirroring the wire rule the backend
- * itself follows: either side must be allowed to grow fields first. Every
- * field the app may not find (a backend older than the app) defaults.
+ * Unknown keys are ignored on purpose, mirroring the rule the backend
+ * follows: either side must be allowed to grow a field first. Every field
+ * an older backend may not send has a default.
  */
 @Serializable
 data class Proposal(
@@ -32,7 +33,6 @@ data class Proposal(
 data class LastDose(
     val id: Long,
     val ml: Int? = null,
-    @SerialName("cap_s") val capS: Int? = null,
     @SerialName("flow_ml") val flowMl: Int? = null,
     val state: String = "sent",
     val source: String? = null,
@@ -46,7 +46,6 @@ data class LastDose(
  * written by the person who taps Apply and by nobody else. */
 @Serializable
 data class Advice(
-    val kind: String = "target",
     val low: Int,
     val high: Int,
     val why: String = "",
@@ -58,8 +57,6 @@ data class Advice(
 @Serializable
 data class Care(
     val found: Boolean = false,
-    val source: String? = null,
-    val fetched: Long? = null,
     @SerialName("common_name") val commonName: String? = null,
     /** The source's own 0-10 scales. Not percentages, and not ours. */
     val light: Int? = null,
@@ -77,19 +74,15 @@ data class Candidate(
     val name: String,
     val common: String? = null,
     val image: String? = null,
-    val slug: String = "",
 )
 
-/** What GET /species answers. `matched` is exact | fuzzy | common | genus |
- * none | unavailable, `candidates` is the shortlist when no name could be
- * placed, and `note` is the sentence to show: the backend words it, because
- * most of the answers are unhappy and each in its own way. */
+/** What GET /species answers. `candidates` is the shortlist when no name
+ * could be placed, and `note` is the sentence to show: the backend words it,
+ * because most of the answers are unhappy and each in its own way. */
 @Serializable
 data class SpeciesAnswer(
     val query: String = "",
-    val matched: String = "none",
     val accepted: String? = null,
-    val rank: String? = null,
     /** Which of the form's kinds to pre-select, read off the botanical
      * family. A guess, and null far more often than not — an unlisted
      * family means nobody knows, and "not sure" already behaves well. */
@@ -107,9 +100,9 @@ data class Pot(
     /** A nickname, editable, unique among pots — not the identity. */
     val name: String,
     val species: String? = null,
-    /** The board's own number, 0..255. An integer since backend 0.17.0, and
-     * board 0 is a real board — the one a new pot is filled in with — so
-     * nothing here may test it for truthiness. */
+    /** The board's own number, 0..255. Board 0 is a real board — the one a
+     * new pot is filled in with — so nothing may test a controller for
+     * truthiness. */
     val controller: Int? = null,
     val channel: Int? = null,
     val outlet: Int? = null,
@@ -125,9 +118,9 @@ data class Pot(
     val mode: String = "manual",
     @SerialName("cooldown_h") val cooldownH: Int? = null,
     @SerialName("daily_cap_ml") val dailyCapMl: Int? = null,
-    /** alive | graveyard, and a word this build may not know: the app
-     * tests `== "alive"`, never `!= "graveyard"`, so a status a newer
-     * backend invents lands in the aside rather than in the watering list. */
+    /** alive | graveyard, or a word this build has never heard of. Tested
+     * with `==` against alive, never `!=` against graveyard, so a status a
+     * newer backend invents lands in the aside, not the watering list. */
     val status: String = "alive",
     val raw: Long? = null,
     val pct: Int? = null,
@@ -144,7 +137,7 @@ data class Pot(
 )
 
 /** One row of the watering history: what was asked, what the meter
- * counted, how it ended, and whose it was. `pot` is null for a dose no
+ * counted, how it ended, and whose it was. `pot_name` is null for a dose no
  * mapping window claims — handed out on a hose no pot held, or never
  * handed out at all. */
 @Serializable
@@ -152,7 +145,6 @@ data class Dose(
     val id: Long,
     val kind: String = "water",
     val ml: Int? = null,
-    @SerialName("cap_s") val capS: Int? = null,
     @SerialName("flow_ml") val flowMl: Int? = null,
     val state: String = "sent",
     val source: String? = null,
@@ -160,7 +152,6 @@ data class Dose(
     @SerialName("sent_ts") val sentTs: Long? = null,
     @SerialName("acked_ts") val ackedTs: Long? = null,
     val verdict: String? = null,
-    val pot: String? = null,
     @SerialName("pot_name") val potName: String? = null,
 )
 
@@ -184,18 +175,13 @@ data class Photo(
     val id: String,
     val ts: Long = 0,
     val bytes: Long = 0,
-    val w: Int? = null,
-    val h: Int? = null,
     val species: String? = null,
     val missing: Boolean = false,
 )
 
 @Serializable
 data class PhotosAnswer(
-    val pot: String = "",
     val photos: List<Photo> = emptyList(),
-    val more: Boolean = false,
-    val now: Long = 0,
 )
 
 /** A picture's address and the one header it needs. The photo routes are
@@ -203,9 +189,8 @@ data class PhotosAnswer(
  * leaves for something that is not an HTTP call made in this class — the
  * image loader has to make its own. */
 data class PhotoSource(val url: String, val token: String) {
-    /** Never the token, for the same reason ButlerConfig does not print
-     * it: the generated toString of a data class is the shortest path
-     * there is from a secret to a crash report. */
+    /** Never the token: a data class's generated toString is the shortest
+     * path from a secret to a crash report. */
     override fun toString(): String = "PhotoSource(url=$url, token=***)"
 }
 
@@ -240,9 +225,6 @@ data class ControllerHealth(
     val command: InFlight? = null,
     val latched: Latch? = null,
     @SerialName("last_refill") val lastRefill: Long? = null,
-    /** The board's last safety error token, as it sent it. */
-    val err: String? = null,
-    @SerialName("err_ts") val errTs: Long? = null,
     val retired: Int = 0,
     /** When the board last said pos=ok; null for one that never has. */
     @SerialName("pos_ok_seen") val posOkSeen: Long? = null,
@@ -251,20 +233,17 @@ data class ControllerHealth(
      * has fewer than two of those. */
     @SerialName("tank_ml") val tankMl: Int? = null,
     /** How many of those runs it has. Null when the backend sent no such
-     * key (a 0.18.0 one): no tank to speak of, rather than "learning 0/2". */
+     * key at all: no tank to speak of, rather than "learning 0/2". */
     @SerialName("tank_samples") val tankSamples: Int? = null,
-    /** Acked water since the counter's origin; 0 without one. The origin
-     * is the latest refill tap that saw the float, unless the float went
-     * empty after that tap and then rose again with nobody tapping: the
-     * tank ran down and was refilled by someone who forgot to tap, the
-     * float demonstrably moved, so the counter restarts at that rise
-     * instead of calling it stuck. A rise with no drop after the tap (the
-     * tap's own fill reaching the float after a tap made at empty, a contra
-     * cleared, a flap lifted) leaves the tap the origin; once the rise is
-     * the origin a second drain keeps it there rather than falling back to
-     * the tap; and with no tap that saw the float the rises count for
-     * nothing. `lastRefill` is the latest tap, blind or not, so this can
-     * count from a moment later than it, or from nothing. */
+    /** Acked water since the counter's origin; 0 without one. The origin is
+     * the latest refill tap that saw the float — unless the float went
+     * empty after that tap and rose again with nobody tapping, which is a
+     * refill by somebody who forgot: the float demonstrably moved, so the
+     * counter restarts at that rise rather than calling it stuck, and stays
+     * there through a second drain. A rise with no drop after the tap
+     * leaves the tap the origin, and with no tap that saw the float the
+     * rises count for nothing. `lastRefill` is the latest tap, blind or
+     * not, so this can count from later than it, or from nothing. */
     @SerialName("pumped_ml") val pumpedMl: Int = 0,
     /** 1 while more than the tank holds has been pumped since that origin
      * and the float still says full (presumed stuck, the rules are dry), or
@@ -274,7 +253,7 @@ data class ControllerHealth(
     /** 1 while the board's own float check stands tripped (ch210: three
      * doses refused on the float in a row). `float` is 0 while it stands —
      * the flap is why — and only a granted dose resets it, which a refill
-     * tap lets the rules queue (D3). 0 from a board or a backend that sends
+     * tap lets the rules queue. 0 from a board or a backend that sends
      * none: never tripped. */
     val flap: Int = 0,
 )
@@ -288,7 +267,6 @@ data class RaisedAlert(
 @Serializable
 data class Health(
     val ok: Boolean = false,
-    val readings: Long = 0,
     @SerialName("last_ts") val lastTs: Long? = null,
     /** BUTLER_NEXT_S on the backend; 60 only until a backend that says so. */
     @SerialName("next_default") val nextDefault: Int = 60,
@@ -311,7 +289,6 @@ data class HistoryPoint(
 
 @Serializable
 data class History(
-    val pot: String = "",
     val since: Long = 0,
     /** The server's clock when it answered: the chart's right edge. */
     val to: Long = 0,
@@ -349,6 +326,12 @@ fun parsePhotoAnswer(answer: String): String? =
  * merged-row checks are the validation. */
 class Refused(val code: Int, val text: String) : Exception(text)
 
+/** A failure as the sentence a screen shows: the exception's own message, or
+ * the class name when it has none — an empty line under a button says nothing
+ * at all. Most of what this ever renders is a Refused carrying the backend's
+ * own words. */
+fun Throwable.reason(): String = message ?: toString()
+
 /** `next=120` as POST /interval answers it; null when it is not that. */
 fun parseNextAnswer(answer: String): Int? =
     answer.trim().removePrefix("next=").takeIf { it != answer.trim() }?.toIntOrNull()
@@ -356,18 +339,17 @@ fun parseNextAnswer(answer: String): Int? =
 /** The one place that touches the network. Blocking calls: the view model
  * runs them on Dispatchers.IO.
  *
- * Where it points is not fixed at construction any more. The address stopped
- * being a build constant on 2026-09-04, so the client that used to be built
- * once from a default argument has to be able to be aimed somewhere else
- * while the app is running — which is what `point` is for. The socket pool
- * and the timeouts are the same either way, so the OkHttp client itself is
- * built once and kept.
+ * Where it points is not fixed at construction — the app can be aimed at
+ * another butler while it runs, which is what `point` is for. The socket
+ * pool and the timeouts do not change with the address, so the OkHttp
+ * client itself is built once and kept.
  */
 class Backend(config: ButlerConfig = ButlerConfig("", "")) {
     /** For the tests, and for a build that still bakes a default in. */
     constructor(baseUrl: String, token: String = "") : this(ButlerConfig(baseUrl, token))
 
-    /** Read on the IO threads, written from the main one. */
+    /** Volatile because it is read on the IO threads and written on the
+     * main one. */
     @Volatile private var here: ButlerConfig = config
 
     private val baseUrl: String
@@ -405,22 +387,22 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
                     .header("X-Token", candidate.token)
                     .build()
             client.newCall(request).execute().use { answer ->
-                readHello(answer.code, answer.body?.string().orEmpty())
+                classifyHello(answer.code, answer.body?.string().orEmpty())
             }
         } catch (why: IllegalArgumentException) {
             // Deliberately NOT why.message: OkHttp quotes the offending
-            // value back, and for the header that value is the token — the
+            // value back, and for that header the value is the token — the
             // message would go straight onto the setup screen. urlProblem
-            // and tokenProblem should have caught this; if they did not,
-            // this is still enough for a person to act on.
+            // and tokenProblem should have caught this, and this sentence
+            // is still enough to act on if they did not.
             Probe.NotTheButler("that address or token has a character this app cannot send")
         } catch (why: IOException) {
-            Probe.NoAnswer(why.message ?: why.toString())
+            Probe.NoAnswer(why.reason())
         }
 
-    /** The token rides on reads too. Most of them do not need it — the
-     * backend gates writes, not reads — but /species spends the household's
-     * quota at a third party and asks for it. */
+    /** The token rides on reads too. Most do not need it — the backend
+     * gates writes, not reads — but /species spends the household's quota
+     * at a third party and asks for it. */
     private fun get(path: String): String {
         val request =
             Request.Builder().url(baseUrl.trimEnd('/') + path).header("X-Token", token).build()
@@ -520,10 +502,9 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
         return parseDoses(get("/doses?$query"))
     }
 
-    /** Bucketed raw counts for one sensor over the last `hours`. The name is
-     * a single token on the wire but not necessarily a URL-safe one. */
-    /** The chart, by pot. Encoded like doses()' `pot=` and for the same
-     * reason: the two must not disagree about what an id looks like. */
+    /** The chart: bucketed raw counts for one pot over the last `hours`.
+     * The id is encoded like doses()' `pot=` and for the same reason — the
+     * two must not disagree about what an id looks like. */
     fun history(potId: String, hours: Int, bucketS: Int): History {
         val pot = URLEncoder.encode(potId, "UTF-8")
         return parseHistory(get("/history?pot=$pot&hours=$hours&bucket_s=$bucketS"))

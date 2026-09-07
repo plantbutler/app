@@ -1,18 +1,16 @@
 package garden.butler.app
 
-/** Pure screen logic: what the garden list shows, split from how. All of it
- * is plain functions of (backend answers, now) so the JVM tests cover it
- * without an emulator.
- */
+/** What the garden list shows: the rows, the health strip and the alerts —
+ * plain functions of (backend answers, now), so the JVM tests cover it
+ * without an emulator. */
 const val ENV_PREFIX = "env:"
 
 /** The one status that waters. Everything else is an aside. */
 const val ALIVE = "alive"
 const val GRAVEYARD = "graveyard"
 
-/** What a new pot's controller box starts at. There is one board, and its
- * number is 0 — an integer since backend 0.17.0, and a real board despite
- * being falsy, which is why nothing anywhere tests a controller for truth. */
+/** What a new pot's controller box starts at: 0, a real board despite being
+ * falsy, so nothing anywhere may test a controller for truth. */
 const val DEFAULT_CONTROLLER = "0"
 
 data class Garden(
@@ -29,7 +27,7 @@ data class Garden(
 
 /** Every pot the answer carried, in one list again: what the cache stores,
  * since splitting is a screen decision and a cache holds the answer. */
-fun Garden.all(): List<Pot> = pots + env + graveyard
+fun Garden.everyPot(): List<Pot> = pots + env + graveyard
 
 /** The pot as the last good read has it; null once it vanished, in which
  * case the open form keeps rendering from its own snapshot. Every screen
@@ -70,7 +68,7 @@ fun splitGarden(all: List<Pot>, health: Health, nowS: Long): Garden {
  * A raised `float:<c>` on a board whose float check tripped renders as the
  * tripped line, not "reservoir empty": the page comes within two reports
  * and the flap stands until the tap, so the strip would otherwise send
- * someone to wait for the water line for the life of the flap (A3). */
+ * someone to wait for the water line for the life of the flap. */
 fun problems(health: Health, nowS: Long): List<String> {
     val found = mutableListOf<String>()
     val raised = health.alerts.map { it.key }.toSet()
@@ -125,7 +123,7 @@ private fun trippedLine(controller: Int): String =
  * `dry` is the board's dry level on the wire (ch211), which whoever held
  * it there set: a reset with a dose in flight, or `dry on` at the console.
  * `resetmid` is the same reset seen as an edge in `err=`, kept for a board
- * whose `dry off` was typed before its first post-reset report (A2). */
+ * whose `dry off` was typed before its first post-reset report. */
 private val LATCH_WORDS =
     mapOf(
         "contra" to "the float said full and the meter saw nothing",
@@ -138,12 +136,10 @@ fun latchReason(reason: String): String = LATCH_WORDS[reason] ?: reason
 /** The board's word that clears the latch it holds, by the reason it gave.
  * `clear contra` clears the contradiction latch only; the dry level, whether
  * the wire says it stands (`dry`) or a reset mid-pour set it (`resetmid`),
- * only `dry off` clears. A reason neither map knows gets contra's word, the
- * backend's own fallback in `latch_steps` (spec D12: one map in each repo,
- * keyed by the reason, the contra words for a reason it does not know): the
- * 409, the page and this card must name the same word, and `clear <reason>`
- * named a command the board's console does not have — it knows `dry on|off`
- * and the two literal tokens `clear contra`, nothing else. */
+ * only `dry off` clears. A reason neither map knows gets contra's word,
+ * mirroring the backend's own fallback: the 409, the page and this card
+ * must name the same word, and the board's console has no `clear <reason>`
+ * command — only `dry on|off` and the two literal tokens `clear contra`. */
 private val LATCH_CLEARS =
     mapOf("contra" to "clear contra", "dry" to "dry off", "resetmid" to "dry off")
 
@@ -301,7 +297,7 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
 
 /** The sample count a row speaks of, or null when the row says nothing about
  * its tank: no tank part on the line, no OVER, no hint, no over line. Null
- * without `tank_samples` — a 0.18.0 backend sends none, and "learning 0/2"
+ * without `tank_samples` — an older backend sends none, and "learning 0/2"
  * would nag for a feature it lacks — and on a retired row: retired is the
  * last word and a quiet one. */
 fun tankSamplesShown(c: ControllerHealth): Int? = c.tankSamples?.takeIf { c.retired != 1 }
@@ -331,7 +327,7 @@ fun tankHint(c: ControllerHealth): String? =
  * omitted `float=` as often as an empty tank, and the tap is the only
  * clear. Under "float ?" too: one report that omits `float=` blanks the
  * row's word, not the backend's memory of it, and the tap snapshots the
- * board's last real word (D2) — which an over board has, the page having
+ * board's last real word — which an over board has, the page having
  * been raised on a float that said full — so the tap counts there as well.
  * A line telling that row its tap would count "once the float is back"
  * called the one action that clears the page futile. */
@@ -385,7 +381,7 @@ fun needsVerdict(d: LastDose?, nowS: Long): Boolean {
 }
 
 /** The nudge under a pot's row while its last dose waits for a verdict. */
-fun rowNote(pot: Pot, nowS: Long): String? {
+fun verdictNudge(pot: Pot, nowS: Long): String? {
     if (pot.status != ALIVE) return null
     val dose = pot.lastDose?.takeIf { needsVerdict(it, nowS) } ?: return null
     val ts = dose.ackedTs ?: dose.sentTs ?: return null
@@ -397,8 +393,8 @@ fun rowNote(pot: Pot, nowS: Long): String? {
  * rules also gate on the board's float and pos, which the firmware does
  * not send yet, and skip a board that is over: those gaps name themselves
  * rather than being read as "fine". While the board's float check stands
- * tripped the rules take a tap after it in place of float=1 (D3), and the
- * gap says so: the board cannot say float=1 until a dose is granted. */
+ * tripped the rules take a tap after it in place of float=1, and the gap
+ * says so: the board cannot say float=1 until a dose is granted. */
 fun learningGaps(pot: Pot, controller: ControllerHealth? = null): List<String> {
     val gaps = mutableListOf<String>()
     if (pot.controller == null) gaps += "a controller"

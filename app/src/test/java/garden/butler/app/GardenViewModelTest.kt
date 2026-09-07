@@ -53,7 +53,7 @@ class GardenViewModelTest {
         @Volatile var lastDose: String? = null
         @Volatile var commandAnswer = MockResponse().setBody("cmd=17\n")
         @Volatile var resumeAnswer = MockResponse().setBody("resumed=0\n")
-        /** What b1's one slot holds, as /health shows it. */
+        /** What board 0's one slot holds, as /health shows it. */
         @Volatile var slot: String? = null
         /** The band the backend would offer pot-1, as /pots carries it. */
         @Volatile var advice: String? = null
@@ -569,7 +569,7 @@ class GardenViewModelTest {
             edit("target_low_pct", "35")
             save()
         }
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         val post = butler.posts().single()
         assertEquals("/pot", post.path)
         assertEquals("s3cret", post.getHeader("X-Token"))
@@ -586,7 +586,7 @@ class GardenViewModelTest {
             edit("name", "genovese")
             save()
         }
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         val post = butler.posts().single()
         assertEquals("/pot", post.path)
         assertEquals("id=pot-1 name=genovese", post.body.readUtf8())
@@ -605,7 +605,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
         assertEquals("mint is another pot's name", form.refused)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -618,7 +618,7 @@ class GardenViewModelTest {
             edit("target_low_pct", "35")
             save()
         }
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         // Not refused as a duplicate of itself, and not sent as a rename.
         assertEquals("id=pot-1 target_low_pct=35", butler.posts().single().body.readUtf8())
     }
@@ -637,10 +637,10 @@ class GardenViewModelTest {
         // The user keeps typing while the backend has not answered: the open
         // form's draft no longer matches what was posted. Keyed on the name,
         // the outcome would never find its form and the screen would sit on
-        // saving = true for good.
+        // busy = true for good.
         onMain { edit("name", "yet_another_name") }
         gate.countDown()
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
         assertEquals("id=pot-1 name=genovese", butler.posts().single().body.readUtf8())
     }
 
@@ -670,7 +670,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
         assertEquals("basil already exists — open it from the list", form.refused)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -683,7 +683,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the note") { (model.screen.value as? Screen.Pot)?.takeIf { it.note != null } }
         assertEquals("set the pot to manual first — the rules would water a sensor held in the air", form.note)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -701,7 +701,7 @@ class GardenViewModelTest {
         assertIs<CalState.SpeedingUp>(wizard.cal)
         assertNull(wizard.cal.prevNextS)
         assertEquals("pot-1", wizard.parent.id)
-        assertEquals(false, wizard.parent.saving)
+        assertEquals(false, wizard.parent.busy)
     }
 
     @Test
@@ -766,10 +766,10 @@ class GardenViewModelTest {
         val history = waitFor("the history") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
         assertEquals("/doses?limit=50", butler.requests.last { it.path?.startsWith("/doses") == true }.path)
         // The dose no window claims is listed, not filtered away.
-        assertNull(history.doses?.last()?.pot)
+        assertNull(history.doses?.last()?.potName)
         assertEquals("expired", history.doses?.last()?.state)
         onMain { back() }
-        assertEquals(Screen.List, model.screen.value)
+        assertEquals(Screen.Garden, model.screen.value)
     }
 
     @Test
@@ -783,13 +783,13 @@ class GardenViewModelTest {
             save()
         }
         waitFor("the POST in flight") { butler.sent("/pot").firstOrNull() }
-        // Back would restore this very snapshot, saving and all, and the
+        // Back would restore this very snapshot, busy and all, and the
         // save's outcome lands on whatever form is shown — not this one.
         onMain { openDoses("pot-1", "basil's water") }
         assertEquals(true, model.screen.value is Screen.Pot)
         assertEquals(emptyList(), butler.requests.filter { it.path?.startsWith("/doses") == true })
         gate.countDown()
-        waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
+        waitFor("the list") { model.screen.value.takeIf { it == Screen.Garden } }
     }
 
     @Test
@@ -895,7 +895,6 @@ class GardenViewModelTest {
         val first = waitFor("a full page") { (model.screen.value as? Screen.Doses)?.takeIf { it.doses != null } }
         assertEquals(DOSES_LIMIT, first.doses?.size)
 
-        // Load older, held on the wire, then pull to refresh over it.
         val gate = CountDownLatch(1)
         butler.dosesGate = gate
         onMain { loadOlderDoses() }
@@ -962,7 +961,7 @@ class GardenViewModelTest {
 
     /** Stamped with the butler it came from, as every real write is: a
      * cache is opened only by the address that wrote it. */
-    private fun cached(pots: kotlin.collections.List<Pot>, health: Health, atS: Long) =
+    private fun cached(pots: List<Pot>, health: Health, atS: Long) =
         CachedGarden(pots, health, atS = atS, url = server.url("/").toString())
 
     private fun withCache(cache: FakeCache): GardenViewModel =
@@ -1008,7 +1007,7 @@ class GardenViewModelTest {
     fun `an unwired pot still fetches its chart`() {
         // The readings carry the pot they were taken for, so a pot with no
         // controller and no channel — just back from the graveyard, say —
-        // has a curve. It used to return early and render nothing.
+        // still has a curve.
         ready()
         onMain { open("pot-3") }
         waitFor("the curve") { butler.histories().firstOrNull() }
@@ -1041,7 +1040,7 @@ class GardenViewModelTest {
         // The form MUST be popped: PotScreen keeps rendering from its own
         // snapshot when the pot vanishes, so staying would leave a working
         // form whose Save posts an id that is gone.
-        assertEquals(Screen.List, model.screen.value)
+        assertEquals(Screen.Garden, model.screen.value)
     }
 
     @Test
@@ -1285,7 +1284,7 @@ class GardenViewModelTest {
             form.waterRefused,
         )
         assertNull(form.watering)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(setOf("/command"), butler.posts().map { it.path }.toSet())
         waitFor("the refresh after it") { butler.sent("/pots").getOrNull(1) }
         gate.countDown()
@@ -1304,7 +1303,7 @@ class GardenViewModelTest {
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.waterRefused != null } }
         assertEquals("busy: cmd=3 state=sent", form.waterRefused)
         assertNull(form.watering)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(1, butler.posts().size)
         butler.slot = """{"id": 3, "state": "sent"}"""
         gate.countDown()
@@ -1354,7 +1353,7 @@ class GardenViewModelTest {
         val issued = assertNotNull(form.watering)
         assertEquals(17, issued.id)
         assertEquals(true, issued.ts in butler.nowS..butler.nowS + 5)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertNull(form.waterRefused)
         waitFor("the refresh after it") { butler.sent("/pots").getOrNull(1) }
         settled()
@@ -1371,7 +1370,7 @@ class GardenViewModelTest {
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.waterRefused != null } }
         assertEquals("a proposal is waiting above — approve it or let it expire", form.waterRefused)
         assertNull(form.watering)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -1403,7 +1402,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
         assertEquals("refused: x", form.refused)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals("35", form.draft["target_low_pct"])
     }
 }

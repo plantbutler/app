@@ -46,7 +46,7 @@ private fun dose(
     ml: Int? = 100,
     flowMl: Int? = null,
     source: String? = null,
-) = LastDose(16, ml, 10, flowMl, state, source, sentTs, ackedTs, verdict)
+) = LastDose(16, ml, flowMl, state, source, sentTs, ackedTs, verdict)
 
 private val complete =
     Pot(
@@ -158,7 +158,7 @@ class GardenTest {
             Health(ok = true, controllers = listOf(controller(lastSeen = 300, nextS = 300)))
         assertEquals(emptyList(), problems(slow, nowS = 1000))
 
-        // And when the backend already raised silent:b1, no second line.
+        // And when the backend already raised silent:0, no second line.
         val paged =
             Health(
                 ok = true,
@@ -223,14 +223,14 @@ class GardenTest {
         // latched, so float= is 0 because of the flap, not the water line.
         // "reservoir empty" would send someone to fill the tank and wait; the
         // flap resets only on a granted dose, which the tap after a refill
-        // lets the rules queue (D3). So the line says the tap.
+        // lets the rules queue. So the line says the tap.
         val tripped = controller(lastSeen = 990, float = 0, pos = "ok", flap = 1)
         val line = "board 0's float check tripped: refill to the top and tap refilled"
         assertEquals(listOf(line), problems(Health(ok = true, controllers = listOf(tripped)), nowS = 1000))
         // The backend pages float:0 within two reports and the flap stands
         // until the tap, so the page renders as the same line rather than as
-        // "reservoir empty" for the life of the flap (A3). Still one float,
-        // one line: the raised one, with the instant one gated behind it.
+        // "reservoir empty" for the life of the flap. Still one float, one
+        // line: the raised one, with the instant one gated behind it.
         val paged =
             Health(
                 ok = true,
@@ -372,7 +372,7 @@ class GardenTest {
 
     @Test
     fun `no tank part without tank_samples, nor on a retired row`() {
-        // A 0.18.0 backend sends no tank_samples: "learning 0/2" would nag for a feature it lacks.
+        // A backend that sends no tank_samples: "learning 0/2" would nag for a feature it lacks.
         assertEquals(
             "board 0 · seen 10s ago · every 60s · float ok · pos ok",
             controllerLine(controller(lastSeen = 990, float = 1, pos = "ok", tankSamples = null), 1000, 60),
@@ -467,7 +467,7 @@ class GardenTest {
         )
         // The board's dry level on the wire (ch211): held dry by a reset
         // with a dose in flight or by `dry on` at the console, and the one
-        // word that clears it is resetmid's (A2).
+        // word that clears it is resetmid's.
         assertEquals(
             "board 0 stopped watering 10min ago: the board is held dry: a reset with the pump " +
                 "running, or dry on at the console. Check the tank, type dry off on the board, then resume.",
@@ -482,8 +482,8 @@ class GardenTest {
         assertEquals("check the tank, type dry off on the board, then resume", latchSteps("resetmid"))
         assertEquals("check the tank, type dry off on the board, then resume", latchSteps("dry"))
         // A reason neither map knows gets contra's words, the backend's own
-        // fallback (D12): the 409, the page and this card name the same
-        // word, and `clear heap` is a command the board's console does not have.
+        // fallback: the 409, the page and this card name the same word, and
+        // `clear heap` is a command the board's console does not have.
         assertEquals("check the tank, type clear contra on the board, then resume", latchSteps("heap"))
         assertEquals(latchSteps("contra"), latchSteps("heap"))
         // The dialog is handed the latch and reads the reason from it: no test
@@ -574,10 +574,10 @@ class GardenTest {
     @Test
     fun `the tank alerts become readable lines`() {
         assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
-        // D7 as amended by the latches spec: the backend's page tells the two
-        // causes apart (the board's float check tripped, or a magnet to look
-        // at) and names the clear for each, so the strip's line carries no
-        // tail of its own to disagree with it.
+        // The backend's page tells the two causes apart (the board's float
+        // check tripped, or a magnet to look at) and names the clear for
+        // each, so the strip's line carries no tail of its own to disagree
+        // with it.
         assertEquals(
             "the float on board 0 still says empty after the refill",
             describeAlert("stale:0"),
@@ -608,7 +608,7 @@ class GardenTest {
         // samples without a size do not.
         assertEquals(TANK_HINT, tankHint(controller(lastSeen = 990, tankSamples = 1, tankMl = 4000)))
         assertNull(tankHint(controller(lastSeen = 990, tankSamples = 2, tankMl = null)))
-        // A 0.18.0 backend sends no tank_samples: nothing to learn, nothing to nag about.
+        // A backend that sends no tank_samples: nothing to learn, nothing to nag about.
         assertNull(tankHint(controller(lastSeen = 990)))
     }
 
@@ -677,9 +677,9 @@ class GardenTest {
         assertEquals(overLine(full), overLine(empty))
         // The same line under "float ?": one report that omits float= blanks
         // the row's word, not the backend's memory of it, and the tap
-        // snapshots the board's last real word (D2), so the tap the line asks
-        // for counts there too. A line saying it would count "once the float
-        // is back" called the one clear futile.
+        // snapshots the board's last real word, so the tap the line asks for
+        // counts there too. A line saying it would count "once the float is
+        // back" called the one clear futile.
         assertEquals(overLine(full), overLine(mute))
         assertTrue(overLine(mute)!!.endsWith("then tap refilled."))
         assertNull(overLine(mute.copy(tankSamples = null)))
@@ -797,15 +797,15 @@ class GardenTest {
     @Test
     fun `the row note nags for a verdict and otherwise stays quiet`() {
         val judged = Pot(name = "basil", lastDose = dose(ackedTs = 1000))
-        assertEquals("dose 2h ago, not judged yet", rowNote(judged, 1000 + 2 * 3600))
-        assertNull(rowNote(judged, 1000 + 60))
-        assertNull(rowNote(Pot(name = "basil"), 5000))
+        assertEquals("dose 2h ago, not judged yet", verdictNudge(judged, 1000 + 2 * 3600))
+        assertNull(verdictNudge(judged, 1000 + 60))
+        assertNull(verdictNudge(Pot(name = "basil"), 5000))
     }
 
     @Test
     fun `a buried pot is never nagged`() {
         val off = Pot(name = "basil", status = GRAVEYARD, lastDose = dose(ackedTs = 1000))
-        assertNull(rowNote(off, 1000 + 2 * 3600))
+        assertNull(verdictNudge(off, 1000 + 2 * 3600))
     }
 
     @Test
@@ -851,9 +851,9 @@ class GardenTest {
     @Test
     fun `learning under a tripped float check names the tap as the other way in`() {
         // While the flap stands the board's float= is 0 by the check's own
-        // doing, and the rules take a tap after it in place of float=1 (D3):
-        // the gap says so, or "float=1" would send someone to wait for a
-        // word the board cannot say until a dose is granted.
+        // doing, and the rules take a tap after it in place of float=1: the
+        // gap says so, or "float=1" would send someone to wait for a word
+        // the board cannot say until a dose is granted.
         assertEquals(
             listOf(
                 "the board reporting float=1 and pos=ok, or a tap after its float check tripped " +
@@ -897,7 +897,7 @@ class GardenTest {
 
     @Test
     fun `board zero is a real board, not an empty one`() {
-        // The controller is an integer now, and 0 is falsy in every language
+        // The controller is an integer, and 0 is falsy in every language
         // this passes through — it is also the number a new pot is filled in
         // with, so anything testing it for truth refuses the commonest board
         // there is.

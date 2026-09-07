@@ -116,13 +116,12 @@ fun calStep(s: CalState, e: CalEvent, nowS: Long): CalState =
                 is CalEvent.Seen -> {
                     val seen = remember(s.seen, e, nowS)
                     if (obeyed(seen)) {
-                        // Air starts empty, and starts from the newest report
-                        // that proved the board sped up. Those reports are
-                        // evidence about the board's pace, not about air: the
-                        // sensor was wherever it was, and "hold it in the AIR"
-                        // has not been shown yet. Folding them into the median
-                        // would calibrate dry against soil, and a pot whose
-                        // scale says it is dry gets watered.
+                        // Air starts empty, from the newest report that
+                        // proved the board sped up. Those reports are
+                        // evidence about the board's pace, not about air —
+                        // "hold it in the AIR" has not been shown yet —
+                        // so folding them into the median would calibrate
+                        // dry against soil.
                         CalState.Air(s.prevNextS, FRESH_FAST_S, seen.first().readTs)
                     } else {
                         s.copy(seen = seen)
@@ -277,8 +276,7 @@ fun canCalibrate(
         return "set the pot to manual first — the rules would water a sensor held in the air"
     }
     if (controller == null || controller.lastSeen == 0L) return "$c has never reported"
-    val threshold = maxOf(600L, 3L * (controller.nextS ?: defaultNextS))
-    if (nowS - controller.lastSeen > threshold) {
+    if (nowS - controller.lastSeen > silentAfterS(controller.nextS, defaultNextS)) {
         return "$c is silent (last reported ${agoText(controller.lastSeen, nowS)})"
     }
     return null

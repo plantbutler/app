@@ -136,8 +136,14 @@ is on screen. Nothing is queued to send later.
   somebody recalibrated. Tapping with fewer than three is allowed and the wizard says what it
   would take (`settleLine`). `canCalibrate` refuses without a mapping, unless the pot is in
   manual (the rules would water a sensor held in the air), and on a silent board.
-- `GardenViewModel.kt` — `state` (Loading / Trouble / Ready) and `screen` (List / Pot /
-  Calibrate). `refresh()` is single-flight and coalesces a request made mid-flight. Every
+- `State.kt` — `UiState` (Loading / Trouble / Ready) and `Screen` (Garden / Pot / Calibrate /
+  Doses / Setup), read by every screen and written by one.
+- `GardenViewModel.kt` — the one class and its three flows, plus what every concern shares:
+  `background()`, `latestOnly()` (a load only the newest of which may land), refresh and the
+  open form's ride on it, the two clocks, and the pot-screen callbacks. Each concern is a file
+  of `internal` extension functions on it — `ModelWizard.kt`, `ModelDoses.kt`,
+  `ModelPhotos.kt`, `ModelCare.kt`, `ModelBoards.kt`, `ModelSetup.kt` — so nothing splits a
+  flow. `refresh()` is single-flight and coalesces a request made mid-flight. Every
   action refreshes afterwards, success or failure. Async outcomes land only on the form they
   were issued from. The wizard driver arms the board with `next=5`, decides on a fresh fetch,
   never takes a standing 5 s as the pace to restore, and restores `prevNextS ?: 0` on every
@@ -146,7 +152,7 @@ is on screen. Nothing is queued to send later.
 - `Chart.kt` — the moisture chart as data: `ChartWindow` (day / week / month, each with the
   bucket that keeps the point count near a day's 288 — a month at five-minute buckets would be
   8640 points and the backend refuses over 2016), `windowTicks` (hours across a day, dates across
-  a week or a month), `scrubbed`/`scrubLabel` (the sample nearest the finger and its own time —
+  a week or a month), `sampleNearest`/`scrubLabel` (the sample nearest the finger and its own time —
   never an interpolation, which would be a reading that never happened), `chartSeries` (segments; the pen lifts across a
   gap longer than max(2 buckets, the silence threshold)), `moisturePct` (the backend's
   formula operation for operation, `Math.rint` for Python's banker's rounding, so the curve
@@ -161,7 +167,7 @@ is on screen. Nothing is queued to send later.
   their own garden): `doseHistoryLine`, `doseTrouble` (the row worth a
   second look — expired, failed, or the meter counting less than half, which is the backend's own
   `2 * flow_ml < ml` rather than a second threshold that could disagree with it in public),
-  `doseWho` (an unattributable dose says so rather than borrowing the name of whoever hangs on
+  `doseOwnerLine` (an unattributable dose says so rather than borrowing the name of whoever hangs on
   that hose now), `doseSource`, `DOSES_LIMIT`.
 - `Cache.kt` — the last good `/pots` and `/health` as one JSON file in the app's own storage, so
   there is something to look at off the tailnet. Whole `Pot`s, never anything derived: a cached
@@ -205,7 +211,7 @@ is on screen. Nothing is queued to send later.
   tailnet and the laptop is plain HTTP on the LAN, so cleartext has to keep working), `urlProblem`
   (OkHttp's own parser, since it is the one that will have to dial it), `tokenProblem` (whitespace
   is a wrong token, because the backend compares byte for byte), and the four-way `Probe` with
-  `readHello`/`probeLine`. `EncryptedConfigStore` is the store itself: EncryptedSharedPreferences,
+  `classifyHello`/`probeLine`. `EncryptedConfigStore` is the store itself: EncryptedSharedPreferences,
   `commit()` not `apply()`, and a store that will not decrypt (a restore onto another device, a
   wiped keystore) is deleted and asked for again rather than thrown — the alternative is an app
   that never starts.
@@ -217,7 +223,7 @@ is on screen. Nothing is queued to send later.
 - `Photos.kt` — a pot's own growth history, as decisions: `sampleSize`/`fitted` (the long edge is
   capped at 1600 before anything is uploaded — a phone photo is several megabytes and the NAS
   volume and its backup were never sized for hundreds of them; subsampled on the way out of the
-  decoder, so twelve megapixels never arrive whole in memory), `strip` (oldest first, so it reads
+  decoder, so twelve megapixels never arrive whole in memory), `oldestFirst` (so the strip reads
   left to right as the plant grew — the wire is newest first like every other list), `speciesBreaks`
   (a pot outlives its plant and nothing records a replant, so the mark is where the species the
   picture was taken under changed; honest about what it cannot see — basil after basil leaves no
@@ -234,6 +240,9 @@ is on screen. Nothing is queued to send later.
   never a stand-in for a picture of the actual pot. A row the butler reports as `missing` shows the
   gap and says "gone" rather than an image that will not load. Coil keys on the URL and a
   photograph's id is minted once, so nothing is re-downloaded over the tailnet.
+- `Widgets.kt` — the three pieces more than one screen draws: `ErrorText` (whatever went
+  wrong, in the colour that says so), `StaleCard` (a read failed, the last good one is still
+  up) and `NotAnswering`.
 - `Main.kt` — `App()`: one `when` over `Screen`, the 60 s refresh loop (paused while the
   wizard polls every 2 s), the BackHandler for the wizard. `GardenScreen.kt`, `PotScreen.kt`
   (hero line, the chart, the water row, proposal card, dose card with verdict chips, discard

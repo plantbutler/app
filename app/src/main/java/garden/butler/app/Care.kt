@@ -2,13 +2,10 @@ package garden.butler.app
 
 import kotlin.math.roundToInt
 
-/** What the care lookup produced, as the words that go on screen.
- *
- * The backend words the outcome sentence (`SpeciesAnswer.note`), because it
- * is the side that knows which of the five endings happened and most of them
- * are unhappy ones. This file words what is *known* about the plant, which
- * is a different thing and, for houseplants, usually nothing.
- */
+/** What the care lookup produced, as the words that go on screen: what is
+ * *known* about the plant, which is different from the outcome sentence
+ * (`SpeciesAnswer.note`, worded by the backend, the side that knows which of
+ * the five endings happened) and, for houseplants, usually nothing. */
 
 /** The same folding the backend's cache key uses, so "Ocimum_basilicum" and
  * "ocimum  basilicum" are one name here too. */
