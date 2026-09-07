@@ -57,31 +57,28 @@ class SavePotTest : ButlerTest() {
     }
 
     @Test
-    fun `a rename onto another pot's name is refused before any POST`() {
+    fun `a name another pot holds is refused before any POST, creating or renaming`() {
+        // Whether a name is taken is PotFormTest's `nameTaken`; here it is
+        // the two ends of it — a create spelt like a stored pot, and a
+        // rename onto one — each told which pot has the name it typed.
         ready()
-        onMain {
-            open("pot-1")
-            edit("name", "mint")
-            save()
+        val forms =
+            listOf(
+                null to "basil already exists — open it from the list",
+                "pot-1" to "mint is another pot's name",
+            )
+        for ((id, why) in forms) {
+            onMain {
+                if (id == null) newPot() else open(id)
+                edit("name", if (id == null) "basil" else "mint")
+                save()
+            }
+            val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
+            assertEquals(why, form.refused)
+            assertEquals(false, form.busy)
+            assertEquals(emptyList(), butler.posts())
+            onMain { back() }
         }
-        val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
-        assertEquals("mint is another pot's name", form.refused)
-        assertEquals(false, form.busy)
-        assertEquals(emptyList(), butler.posts())
-    }
-
-    @Test
-    fun `a new pot spelt like a stored one is refused before any POST`() {
-        ready()
-        onMain {
-            newPot()
-            edit("name", "basil")
-            save()
-        }
-        val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
-        assertEquals("basil already exists — open it from the list", form.refused)
-        assertEquals(false, form.busy)
-        assertEquals(emptyList(), butler.posts())
     }
 
     @Test

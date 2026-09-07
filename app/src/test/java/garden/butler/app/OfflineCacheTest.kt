@@ -11,12 +11,20 @@ class OfflineCacheTest : ButlerTest() {
     private fun cachedPot(name: String = "basil") =
         pot(name = name, id = "pot-1", controller = 0, channel = 0, outlet = 3, doseMl = 100, raw = 9000)
 
-    @Test
-    fun `the cache fills the screen at launch, stamped with its age`() {
-        val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
+    /** A two-hour-old garden on screen, which is what every refusal below
+     * needs before it can be refused. */
+    private fun openMemory(name: String = "basil", health: Health = Health(ok = true)): FakeCache {
+        val cache = FakeCache(cached(listOf(cachedPot(name)), health, butler.nowS - 7200))
         model = withCache(cache)
         onMain { openCache() }
-        val shown = waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        return cache
+    }
+
+    @Test
+    fun `the cache fills the screen at launch, stamped with its age`() {
+        openMemory()
+        val shown = model.state.value as UiState.Ready
         assertEquals(butler.nowS - 7200, shown.cachedAtS)
         assertEquals(listOf("basil"), shown.garden.pots.map { it.name })
         // Nothing was asked of the butler to get this on screen.
@@ -37,10 +45,7 @@ class OfflineCacheTest : ButlerTest() {
 
     @Test
     fun `a live answer clears the stamp and is written back to the cache`() {
-        val cache = FakeCache(cached(listOf(cachedPot("stale")), Health(), butler.nowS - 7200))
-        model = withCache(cache)
-        onMain { openCache() }
-        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        val cache = openMemory("stale", Health())
         onMain { refresh() }
         val live = waitFor("the live garden") { (model.state.value as? UiState.Ready)?.takeIf { it.cachedAtS == null } }
         assertEquals(listOf("basil", "mint"), live.garden.pots.map { it.name })
@@ -82,10 +87,7 @@ class OfflineCacheTest : ButlerTest() {
 
     @Test
     fun `nothing is written to the butler while the screen is a memory`() {
-        val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
-        model = withCache(cache)
-        onMain { openCache() }
-        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        openMemory()
         onMain { open("pot-1") }
         val form = potForm()
 
@@ -121,10 +123,7 @@ class OfflineCacheTest : ButlerTest() {
     fun `a delete is refused while the garden is a memory`() {
         // The one irreversible thing here must not be the one thing allowed
         // against numbers nobody has confirmed.
-        val cache = FakeCache(cached(listOf(cachedPot("stale")), Health(), butler.nowS - 7200))
-        model = withCache(cache)
-        onMain { openCache() }
-        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        openMemory("stale", Health())
         onMain { open("pot-1") }
         waitFor("the form") { model.screen.value as? Screen.Pot }
         onMain { deletePot() }
@@ -135,10 +134,7 @@ class OfflineCacheTest : ButlerTest() {
 
     /** A write from a cached garden is refused before anything is posted. */
     private fun refusedAsMemory(action: GardenViewModel.() -> Unit) {
-        val cache = FakeCache(cached(listOf(cachedPot()), Health(ok = true), butler.nowS - 7200))
-        model = withCache(cache)
-        onMain { openCache() }
-        waitFor("the cached garden") { model.state.value as? UiState.Ready }
+        openMemory()
         onMain(action)
         val note = waitFor("the note") { model.listNote.value }
         assertEquals(true, note.startsWith("the butler is not answering"))
