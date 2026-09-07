@@ -271,6 +271,12 @@ data class ControllerHealth(
      * while the backend's over page stands — only a tap clears it, not the
      * float dropping to empty. 0 for a retired board. */
     val over: Int = 0,
+    /** 1 while the board's own float check stands tripped (ch210: three
+     * doses refused on the float in a row). `float` is 0 while it stands —
+     * the flap is why — and only a granted dose resets it, which a refill
+     * tap lets the rules queue (D3). 0 from a board or a backend that sends
+     * none: never tripped. */
+    val flap: Int = 0,
 )
 
 @Serializable

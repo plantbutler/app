@@ -99,6 +99,20 @@ class BackendTest {
     }
 
     @Test
+    fun `health carries the flap, and a backend before 0_20_0 leaves it 0`() {
+        val (tripped, plain) =
+            parseHealth(
+                """{"ok": true, "controllers": [
+                     {"controller": 0, "last_seen": 5, "float": 0, "flap": 1},
+                     {"controller": 1, "last_seen": 5, "float": 0}
+                   ]}""",
+            ).controllers
+        assertEquals(1, tripped.flap)
+        // Absent is 0, as the backend reads an absent ch210: never tripped.
+        assertEquals(0, plain.flap)
+    }
+
+    @Test
     fun `the counter and over count from the origin, which is the tap or a rise after a drain`() {
         // The origin is the backend's: the latest tap that saw the float, or
         // the float's rise once it went empty after that tap and full again

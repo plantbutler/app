@@ -31,10 +31,11 @@ private fun controller(
     tankSamples: Int? = null,
     pumpedMl: Int = 0,
     over: Int = 0,
+    flap: Int = 0,
 ) = ControllerHealth(
     name, lastSeen, nextS, float, pos, command,
     latched = latched, lastRefill = lastRefill, retired = retired, posOkSeen = posOkSeen,
-    tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over,
+    tankMl = tankMl, tankSamples = tankSamples, pumpedMl = pumpedMl, over = over, flap = flap,
 )
 
 private fun dose(
@@ -217,6 +218,29 @@ class GardenTest {
     }
 
     @Test
+    fun `a tripped float check says the tap is the way out, gated like the line it replaces`() {
+        // ch210: the board refused three doses running on its float and
+        // latched, so float= is 0 because of the flap, not the water line.
+        // "reservoir empty" would send someone to fill the tank and wait; the
+        // flap resets only on a granted dose, which the tap after a refill
+        // lets the rules queue (D3). So the line says the tap.
+        val tripped = controller(lastSeen = 990, float = 0, pos = "ok", flap = 1)
+        assertEquals(
+            listOf("board 0's float check tripped: refill to the top and tap refilled"),
+            problems(Health(ok = true, controllers = listOf(tripped)), nowS = 1000),
+        )
+        // Once the backend has paged float:0 its line stands alone, exactly
+        // as for the plain empty reservoir: one float, one line.
+        val paged =
+            Health(
+                ok = true,
+                controllers = listOf(tripped),
+                alerts = listOf(RaisedAlert("float:0", raisedTs = 950)),
+            )
+        assertEquals(listOf("reservoir empty on board 0 (50s ago)"), problems(paged, nowS = 1000))
+    }
+
+    @Test
     fun `instant float and pos lines are deduplicated against raised alerts`() {
         val health =
             Health(
@@ -294,6 +318,24 @@ class GardenTest {
         assertEquals(
             "board 0 · seen 10s ago · every 60s · float ok · pos 3",
             controllerLine(controller(lastSeen = 990, float = 1, pos = "3"), 1000, 60),
+        )
+    }
+
+    @Test
+    fun `the controller line says the float check tripped in place of EMPTY while the flap stands`() {
+        // The board's own float check tripped (ch210): float= is 0 because
+        // of it, so the word says why rather than "EMPTY", which reads as a
+        // tank to fill when this is a tank to fill and tap.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float check tripped · pos ok",
+            controllerLine(controller(lastSeen = 990, float = 0, pos = "ok", flap = 1), 1000, 60),
+        )
+        // It stands in for the 0 word only. The board computes float= as
+        // debounced AND !contra AND !flap, so a 1 beside flap=1 is the
+        // board's own word and is shown as sent.
+        assertEquals(
+            "board 0 · seen 10s ago · every 60s · float ok · pos ok",
+            controllerLine(controller(lastSeen = 990, float = 1, pos = "ok", flap = 1), 1000, 60),
         )
     }
 
@@ -513,18 +555,16 @@ class GardenTest {
     @Test
     fun `the tank alerts become readable lines`() {
         assertEquals("board 0 pumped more than its tank holds", describeAlert("over:0"))
-        // D7: two causes, two clears. A freed magnet clears the page by itself
-        // (the float word goes back to 1); the board's own float check, once
-        // tripped, resets only on a granted dose. Both ways out are named,
-        // since the phone is where the page is read.
+        // D7 as amended by the latches spec: the backend's page tells the two
+        // causes apart (the board's float check tripped, or a magnet to look
+        // at) and names the clear for each, so the strip's line carries no
+        // tail of its own to disagree with it.
         assertEquals(
-            "the float on board 0 still says empty after the refill: " +
-                "look at the magnet, or water once from the phone",
+            "the float on board 0 still says empty after the refill",
             describeAlert("stale:0"),
         )
         assertEquals(
-            "the float on board 0 still says empty after the refill (8min ago): " +
-                "look at the magnet, or water once from the phone",
+            "the float on board 0 still says empty after the refill (8min ago)",
             describeAlert("stale:0", nowS = 1000, raisedTs = 500),
         )
         // Never raised in /health by design; rendered anyway rather than echoing the key.

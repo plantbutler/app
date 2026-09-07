@@ -82,7 +82,14 @@ fun problems(health: Health, nowS: Long): List<String> {
             found += "${boardName(c.controller)} last reported ${agoText(c.lastSeen, nowS)}"
         }
         if (c.float == 0 && "float:${c.controller}" !in raised) {
-            found += "reservoir empty on ${boardName(c.controller)}"
+            // The board's own float check tripped: the way out is a tap
+            // after a refill, not a wait for the water line.
+            found +=
+                if (c.flap == 1) {
+                    "${boardName(c.controller)}'s float check tripped: refill to the top and tap refilled"
+                } else {
+                    "reservoir empty on ${boardName(c.controller)}"
+                }
         }
         if (c.pos == "unknown" && c.posOkSeen != null && "pos:${c.controller}" !in raised) {
             found += "${boardName(c.controller)} lost its manifold position"
@@ -163,9 +170,9 @@ fun describeAlert(key: String, nowS: Long = 0, raisedTs: Long = 0): String {
         "pos" -> "${board(1)} lost its manifold position$since"
         "latch" -> "${board(1)} stopped watering$since"
         "over" -> "${board(1)} pumped more than its tank holds$since"
-        "stale" ->
-            "the float on ${board(1)} still says empty after the refill$since: " +
-                "look at the magnet, or water once from the phone"
+        // The page tells the two causes apart and names each one's clear;
+        // this line carries no tail of its own to disagree with it.
+        "stale" -> "the float on ${board(1)} still says empty after the refill$since"
         // A one-shot the backend keeps out of /health; rendered all the same.
         "tank" -> "${board(1)} measured its tank$since"
         "sensor" ->
@@ -238,7 +245,9 @@ fun mlText(ml: Int): String {
 
 /** One line per controller on the health list: "board 0 · seen 40s ago ·
  * every 60s · float ok · pos ok · tank ≈4.2 L, 1.1 L pumped" (or "tank
- * learning 1/2" until it is measured), plus the command in flight when
+ * learning 1/2" until it is measured; "float check tripped" in place of
+ * "float EMPTY" while the board's flap stands, since the 0 is the check's
+ * doing and the tap is the clear), plus the command in flight when
  * there is one, then STOPPED while the butler has stopped watering it,
  * OVER while the backend says so (it pumped more than the tank holds with
  * the float still saying full, or that page stands: only a tap clears it,
@@ -253,7 +262,7 @@ fun controllerLine(c: ControllerHealth, nowS: Long, defaultNextS: Int): String {
     val float =
         when (c.float) {
             null -> "float ?"
-            0 -> "float EMPTY"
+            0 -> if (c.flap == 1) "float check tripped" else "float EMPTY"
             else -> "float ok"
         }
     val pos = c.pos?.let { "pos $it" } ?: "pos ?"
