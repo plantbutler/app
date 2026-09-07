@@ -110,7 +110,7 @@ private fun DoseRow(dose: Dose, showPot: Boolean, nowS: Long) {
     val trouble = doseTrouble(dose)
     ListItem(
         headlineContent = { Text(doseHistoryLine(dose, nowS)) },
-        overlineContent = if (showPot) ({ Text(doseWho(dose)) }) else null,
+        overlineContent = if (showPot) ({ Text(doseOwnerLine(dose)) }) else null,
         supportingContent = {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 trouble?.let { ErrorText(it) }

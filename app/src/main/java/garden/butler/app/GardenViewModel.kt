@@ -45,7 +45,10 @@ sealed interface Screen {
         val id: String?,
         val original: Map<String, String>,
         val draft: Map<String, String>,
-        val saving: Boolean = false,
+        /** Something of this form's is on the wire: a save, a water, a
+         * delete, or the wizard arming a board. Every one of them greys the
+         * form and stops it being left, so they are one flag. */
+        val busy: Boolean = false,
         val refused: String? = null,
         val note: String? = null,
         /** The stored sensor's curve over `window`; stays up when a reload
@@ -54,7 +57,7 @@ sealed interface Screen {
         val historyWhy: String? = null,
         val window: ChartWindow = ChartWindow.DAY,
         /** The water command this form queued, followed until its fate is known. */
-        val watering: Issued? = null,
+        val watering: QueuedDose? = null,
         val waterRefused: String? = null,
         /** The last species lookup made from this form. Stored nowhere: the
          * pot keeps the name in its draft, and the garden carries the
@@ -162,11 +165,11 @@ class GardenViewModel(
      * another butler cancels the lot: an answer from the old address
      * landing on the new one's screen is the same mistake as keeping its
      * cache, and a slow /pots is the shape that would do it. A supervisor,
-     * so one flight failing does not take its siblings with it; a child of
+     * so one job failing does not take its siblings with it; a child of
      * viewModelScope's job, so clearing the view model cancels everything. */
     private var work = SupervisorJob(viewModelScope.coroutineContext[Job])
 
-    private fun flight(block: suspend CoroutineScope.() -> Unit): Job =
+    private fun background(block: suspend CoroutineScope.() -> Unit): Job =
         viewModelScope.launch(work, block = block)
 
     /** True once the app knows which butler it is talking to. Nothing goes
@@ -177,8 +180,8 @@ class GardenViewModel(
      *
      * A probe takes five seconds to time out, and in five seconds somebody
      * can go back, come in again and connect somewhere else. The pointing
-     * coroutine is the one thing here that is not a flight — it is what
-     * cancels the flights — so nothing can cancel it, and it has to know
+     * coroutine is the one thing here that is not one of them — it is
+     * what cancels them — so nothing can cancel it, and it has to know
      * for itself when it has been superseded. Without this a slow first
      * Connect finishes last and moves the app back to the butler the user
      * just left. */
@@ -187,7 +190,7 @@ class GardenViewModel(
     init {
         val store = settings
         if (store != null) {
-            // Not a flight: this is what decides where the flights go.
+            // Not one of them: this is what decides where they all go.
             viewModelScope.launch {
                 val stored = withContext(Dispatchers.IO) { store.read() }?.takeIf { it.complete }
                 if (stored == null) {
@@ -211,14 +214,14 @@ class GardenViewModel(
     fun openCache() {
         val store = cache ?: return
         if (!addressed) return
-        flight {
-            val cached = withContext(Dispatchers.IO) { store.read() } ?: return@flight
-            if (current.value is UiState.Ready) return@flight
+        background {
+            val cached = withContext(Dispatchers.IO) { store.read() } ?: return@background
+            if (current.value is UiState.Ready) return@background
             // Whose plants these are. Pointing the app elsewhere clears the
             // cache, but a delete that failed, or a kill in between, would
             // leave one butler's garden to be shown under another's name;
             // this is what makes that impossible rather than unlikely.
-            if (cached.url != backend.address) return@flight
+            if (cached.url != backend.address) return@background
             current.value =
                 UiState.Ready(
                     splitGarden(cached.pots, cached.health, phoneS()),
@@ -253,7 +256,7 @@ class GardenViewModel(
                 else -> before
             }
         fetching =
-            flight {
+            background {
                 val fresh =
                     try {
                         val garden =
@@ -268,7 +271,7 @@ class GardenViewModel(
                             // cached raw instead.
                             cache?.write(
                                 CachedGarden(
-                                    garden.all().map { it.copy(pct = null) },
+                                    garden.everyPot().map { it.copy(pct = null) },
                                     garden.health,
                                     phoneS(),
                                     backend.address,
@@ -339,7 +342,7 @@ class GardenViewModel(
     /** The curve is raw counts read through the pot's current calibration,
      * so a recalibration needs no reload; a failed fetch keeps the curve
      * already up and says why beside it. Single-flight: a reload cancels
-     * the one before it, and a cancelled flight lands nothing — not even
+     * the one before it, and a cancelled job lands nothing — not even
      * its failure over a newer curve. */
     private fun loadHistory(form: Screen.Pot) {
         // By pot, and gated on nothing else: the readings carry the pot they
@@ -348,7 +351,7 @@ class GardenViewModel(
         val id = form.id ?: return
         historyFlight?.cancel()
         historyFlight =
-            flight {
+            background {
                 try {
                     val history =
                         withContext(Dispatchers.IO) {
@@ -372,7 +375,7 @@ class GardenViewModel(
         val id = form.id ?: return
         photosFlight?.cancel()
         photosFlight =
-            flight {
+            background {
                 try {
                     val answer = withContext(Dispatchers.IO) { backend.photos(id) }
                     onPot(form) { it.copy(photos = answer.photos, photosWhy = null) }
@@ -404,7 +407,7 @@ class GardenViewModel(
         val id = form.id ?: return noteOnPot(form, "save the pot first")
         staleRefusal()?.let { why -> return noteOnPot(form, why) }
         onPot(form) { it.copy(uploading = true, note = null, photosWhy = null) }
-        flight {
+        background {
             val why =
                 try {
                     withContext(Dispatchers.IO) { backend.addPhoto(id, jpeg, w, h) }
@@ -433,7 +436,7 @@ class GardenViewModel(
         val form = shown.value as? Screen.Pot ?: return
         staleRefusal()?.let { why -> return noteOnPot(form, why) }
         onPot(form) { it.copy(viewing = null) }
-        flight {
+        background {
             val note =
                 try {
                     withContext(Dispatchers.IO) { backend.deletePhoto(photoId) }
@@ -494,25 +497,25 @@ class GardenViewModel(
         val controller = pot.controller ?: return
         val outlet = pot.outlet ?: return
         val ml = pot.doseMl ?: return
-        onPot(form) { it.copy(saving = true, waterRefused = null) }
-        flight {
+        onPot(form) { it.copy(busy = true, waterRefused = null) }
+        background {
             // A POST that timed out client-side may still have queued the
             // dose: the refresh after it shows the slot either way.
             try {
                 val id = withContext(Dispatchers.IO) { backend.water(controller, outlet, ml) }
                 onPot(form) {
                     if (id == null) {
-                        it.copy(saving = false, waterRefused = NO_COMMAND_ID)
+                        it.copy(busy = false, waterRefused = NO_COMMAND_ID)
                     } else {
-                        it.copy(saving = false, watering = Issued(id, phoneS()), waterRefused = null)
+                        it.copy(busy = false, watering = QueuedDose(id, phoneS()), waterRefused = null)
                     }
                 }
             } catch (why: CancellationException) {
                 throw why
             } catch (why: IOException) {
-                onPot(form) { it.copy(saving = false, waterRefused = NO_ANSWER) }
+                onPot(form) { it.copy(busy = false, waterRefused = NO_ANSWER) }
             } catch (why: Exception) {
-                onPot(form) { it.copy(saving = false, waterRefused = why.reason()) }
+                onPot(form) { it.copy(busy = false, waterRefused = why.reason()) }
             }
             refresh()
         }
@@ -551,7 +554,7 @@ class GardenViewModel(
         // Whatever was being tried is no longer what the user is doing.
         attempt++
         noteOnList.value = null
-        flight {
+        background {
             val stored = withContext(Dispatchers.IO) { store.read() }
             shown.value =
                 Screen.Setup(
@@ -582,8 +585,8 @@ class GardenViewModel(
         val candidate = ButlerConfig(normaliseUrl(form.url), form.token.trim())
         onSetup { it.copy(checking = true, why = null) }
         val mine = ++attempt
-        // Deliberately not a flight: pointing the app somewhere else cancels
-        // every flight, and this is the coroutine that does the pointing —
+        // Deliberately not one of them: pointing the app somewhere else
+        // cancels every background job, and this is what does the pointing —
         // which is why it needs `attempt` of its own, nothing else being
         // able to cancel it when it is superseded.
         viewModelScope.launch {
@@ -681,11 +684,11 @@ class GardenViewModel(
         val parent = shown.value as? Screen.Pot
         // Not while the form has something on the wire. Back restores this
         // very snapshot, so leaving mid-save brings back a form stuck on
-        // saving = true, its Save and Water greyed out for good: the
+        // busy = true, its Save and Water greyed out for good: the
         // outcome lands on the form that is shown, and this one is not.
         // Worse over the wizard's arming POST, which would leave the board
         // reporting every 5 s with no wizard on screen to restore it.
-        if (parent?.saving == true) return
+        if (parent?.busy == true) return
         val screen = Screen.Doses(parent, potId, title)
         noteOnList.value = null
         shown.value = screen
@@ -696,14 +699,14 @@ class GardenViewModel(
 
     /** Single-flight, like the chart's loader: two quick pulls must not
      * race, or the slower answer lands last and quietly replaces the
-     * fresher list with an older one. The flight is shared with the pager,
+     * fresher list with an older one. The job is shared with the pager,
      * so a reload also cancels a page that is on its way. */
     private fun loadDoses(screen: Screen.Doses) {
         dosesFlight?.cancel()
         val fresh = screen.copy(loadingMore = false)
         shown.value = fresh
         dosesFlight =
-            flight {
+            background {
                 try {
                     val answer = withContext(Dispatchers.IO) { backend.doses(fresh.potId, DOSES_LIMIT) }
                     onDoses(fresh) {
@@ -742,7 +745,7 @@ class GardenViewModel(
         val asking = screen.copy(loadingMore = true, why = null)
         shown.value = asking
         dosesFlight =
-            flight {
+            background {
                 try {
                     val answer = withContext(Dispatchers.IO) { backend.doses(asking.potId, DOSES_LIMIT, cursor) }
                     onDoses(asking) {
@@ -784,13 +787,13 @@ class GardenViewModel(
                 }
             return onPot(form) { it.copy(refused = why) }
         }
-        onPot(form) { it.copy(saving = true, refused = null) }
+        onPot(form) { it.copy(busy = true, refused = null) }
         // A create must name the pot; an edit names it only to rename it,
         // so an unrelated field change cannot carry a stale nickname back
         // over a rename that landed from another phone meanwhile.
         val naming = if (form.id == null || renamed(form.original, form.draft)) name else null
         val body = potBody(form.id, naming, changedFields(form.original, form.draft))
-        flight {
+        background {
             // A save that timed out client-side may still have committed:
             // the refresh after it, either way, shows what the backend has.
             try {
@@ -799,7 +802,7 @@ class GardenViewModel(
             } catch (why: CancellationException) {
                 throw why
             } catch (why: Exception) {
-                onPot(form) { it.copy(saving = false, refused = why.reason()) }
+                onPot(form) { it.copy(busy = false, refused = why.reason()) }
             }
             refresh()
         }
@@ -815,7 +818,7 @@ class GardenViewModel(
     private fun setStatus(id: String, status: String) {
         if (!addressed) return
         staleRefusal()?.let { why -> return noteOnList.update { why } }
-        flight {
+        background {
             try {
                 withContext(Dispatchers.IO) { backend.postPot("id=$id status=$status") }
             } catch (why: CancellationException) {
@@ -838,15 +841,15 @@ class GardenViewModel(
         val form = shown.value as? Screen.Pot ?: return
         val id = form.id ?: return
         staleRefusal()?.let { why -> return onPot(form) { it.copy(refused = why) } }
-        onPot(form) { it.copy(saving = true, refused = null) }
-        flight {
+        onPot(form) { it.copy(busy = true, refused = null) }
+        background {
             try {
                 withContext(Dispatchers.IO) { backend.deletePot(id) }
                 shown.update { if (it is Screen.Pot && it.isForm(form)) Screen.List else it }
             } catch (why: CancellationException) {
                 throw why
             } catch (why: Exception) {
-                onPot(form) { it.copy(saving = false, refused = why.reason()) }
+                onPot(form) { it.copy(busy = false, refused = why.reason()) }
             }
             refresh()
         }
@@ -862,7 +865,7 @@ class GardenViewModel(
             return onPot(form) { it.copy(lookup = SpeciesAnswer(note = "type a species first")) }
         }
         onPot(form) { it.copy(lookingUp = true, lookup = null) }
-        flight {
+        background {
             val answer =
                 try {
                     withContext(Dispatchers.IO) { backend.species(normaliseSpecies(typed)) }
@@ -976,7 +979,7 @@ class GardenViewModel(
         staleRefusal()?.let { why -> return noteOnPot(parent, why) }
         val id = parent.id ?: return
         val name = currentPot(id)?.name ?: parent.original["name"] ?: return
-        if (parent.saving) return
+        if (parent.busy) return
         // A rename is a change like any other here: the wizard posts the
         // stored name, so an unsaved one would be silently dropped.
         if (formDirty(parent.original, parent.draft)) {
@@ -985,8 +988,8 @@ class GardenViewModel(
                 "save or discard your changes first — the wizard calibrates the stored controller and channel",
             )
         }
-        onPot(parent) { it.copy(saving = true, note = null) }
-        flight {
+        onPot(parent) { it.copy(busy = true, note = null) }
+        background {
             val refusal =
                 try {
                     arm(parent, id, name)
@@ -995,7 +998,7 @@ class GardenViewModel(
                 } catch (why: Exception) {
                     why.reason()
                 }
-            if (refusal != null) onPot(parent) { it.copy(saving = false, note = refusal) }
+            if (refusal != null) onPot(parent) { it.copy(busy = false, note = refusal) }
             refresh()
         }
     }
@@ -1030,7 +1033,7 @@ class GardenViewModel(
         val prevNextS = on?.nextS?.takeUnless { it == FAST_NEXT_S }
         val start = calStart(prevNextS, nowS(), health.nextDefault)
         shown.update {
-            if (it is Screen.Pot && it.id == parent.id) Screen.Calibrate(it.copy(saving = false), start) else it
+            if (it is Screen.Pot && it.id == parent.id) Screen.Calibrate(it.copy(busy = false), start) else it
         }
         return null
     }
@@ -1041,7 +1044,7 @@ class GardenViewModel(
         val id = (shown.value as? Screen.Calibrate)?.parent?.id ?: return
         if (polling?.isActive == true) return
         polling =
-            flight {
+            background {
                 val fetched =
                     try {
                         withContext(Dispatchers.IO) { backend.pots() to backend.health() }
@@ -1081,7 +1084,7 @@ class GardenViewModel(
         // numbers are the whole edit. Resending the nickname it opened with
         // would undo a rename made anywhere else in that time.
         val body = potBody(parent.id, null, mapOf("dry_raw" to "${s.dry}", "wet_raw" to "${s.wet}"))
-        flight {
+        background {
             val outcome =
                 try {
                     withContext(Dispatchers.IO) { backend.postPot(body) }
@@ -1104,7 +1107,7 @@ class GardenViewModel(
         val parent = wizard.parent
         val controller = calController
         val prevNextS = wizard.cal.prevNextS
-        flight {
+        background {
             val failure =
                 try {
                     if (controller != null) {
@@ -1127,7 +1130,7 @@ class GardenViewModel(
 
     /** The backend's answer, or its refusal, lands where the user is looking. */
     private fun act(call: () -> String, land: (String) -> Unit) {
-        flight {
+        background {
             val text =
                 try {
                     withContext(Dispatchers.IO) { call() }

@@ -155,7 +155,7 @@ class SetupFlowTest {
     private fun settled(): UiState.Ready =
         waitFor("a settled garden") { (model.state.value as? UiState.Ready)?.takeIf { !it.refreshing } }
 
-    private fun plants() = settled().garden.all().map { it.name }
+    private fun plants() = settled().garden.everyPot().map { it.name }
 
     /** The repoint is asynchronous and the old garden is still on screen
      * while it runs, so a bare settled() would read the butler this test is
@@ -163,7 +163,7 @@ class SetupFlowTest {
     private fun plantsBecome(expected: List<String>) {
         waitFor("the garden to become $expected") {
             (model.state.value as? UiState.Ready)?.takeIf {
-                !it.refreshing && it.garden.all().map { pot -> pot.name } == expected
+                !it.refreshing && it.garden.everyPot().map { pot -> pot.name } == expected
             }
         }
     }
@@ -387,7 +387,7 @@ class SetupFlowTest {
     @Test
     fun `a slow Connect cannot finish last and move the app back`() {
         // The pointing coroutine is the one thing here that is not a
-        // flight — it is what cancels the flights — so nothing can cancel
+        // background job — it is what cancels them — so nothing can cancel
         // it, and without an attempt counter a five-second probe finishes
         // after a later one and puts the app back on the butler the user
         // just left.

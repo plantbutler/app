@@ -27,7 +27,7 @@ import coil.compose.AsyncImage
 @Composable
 fun SpeciesPanel(screen: Screen.Pot, model: GardenViewModel) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = model::lookUpSpecies, enabled = !screen.lookingUp && !screen.saving) {
+        TextButton(onClick = model::lookUpSpecies, enabled = !screen.lookingUp && !screen.busy) {
             Text("Look up")
         }
         if (screen.lookingUp) Text("asking…", style = MaterialTheme.typography.bodySmall)

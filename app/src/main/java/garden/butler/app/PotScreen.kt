@@ -167,13 +167,13 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
                 pot.proposal?.let { ProposalCard(it, nowS, live) { model.approve(it.id) } }
                 pot.lastDose?.let { DoseCard(it, nowS, live) { v -> model.verdict(it.id, v) } }
                 pot.advice?.let {
-                    AdviceCard(it, live && !screen.saving, { model.applyAdvice(it) }, model::dismissAdvice)
+                    AdviceCard(it, live && !screen.busy, { model.applyAdvice(it) }, model::dismissAdvice)
                 }
             }
             if (pot != null) {
                 TextButton(
                     onClick = { model.openDoses(pot.id, "${pot.name}'s water") },
-                    enabled = !screen.saving, // mid-save, leaving would strand the form
+                    enabled = !screen.busy, // mid-save, leaving would strand the form
                 ) {
                     Text("Watering history")
                 }
@@ -198,7 +198,7 @@ fun PotScreen(model: GardenViewModel, screen: Screen.Pot) {
             }
             Button(
                 onClick = model::save,
-                enabled = dirty && named && !screen.saving && emptied.isEmpty() && !collision && live,
+                enabled = dirty && named && !screen.busy && emptied.isEmpty() && !collision && live,
             ) {
                 Text("Save")
             }
@@ -295,7 +295,7 @@ private fun Chart(
     }
     val caption = chartCaption(history, pot.dryRaw, pot.wetRaw, env = pot.name.startsWith(ENV_PREFIX))
     // Finger position in pixels and canvas width; -1 means nothing is touching
-    // it. The decision itself is scrubbed(), a pure function — this is only plumbing.
+    // it. The decision itself is sampleNearest(), a pure function — this is only plumbing.
     var scrubX by remember { mutableFloatStateOf(-1f) }
     var widthPx by remember { mutableIntStateOf(0) }
     var scrubText: String? = null
@@ -311,7 +311,7 @@ private fun Chart(
             remember(history.since, history.to, zone, window) { windowTicks(window, history.since, history.to, zone) }
         val scrub =
             if (scrubX >= 0 && widthPx > 0) {
-                scrubbed(series, scrubX / widthPx.toDouble(), history.since, history.to)
+                sampleNearest(series, scrubX / widthPx.toDouble(), history.since, history.to)
             } else {
                 null
             }
@@ -421,7 +421,7 @@ private fun WaterRow(screen: Screen.Pot, pot: Pot, reason: String?, model: Garde
         )
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Button(onClick = { askWater = true }, enabled = reason == null && !screen.saving && !following) {
+        Button(onClick = { askWater = true }, enabled = reason == null && !screen.busy && !following) {
             Text(pot.doseMl?.let { "Water $it ml" } ?: "Water")
         }
         status?.let {
@@ -478,7 +478,7 @@ private fun Form(
         onValueChange = { model.edit("name", it) },
         label = { Text(NAME_FIELD.label) },
         singleLine = true,
-        enabled = !screen.saving,
+        enabled = !screen.busy,
         trailingIcon = { Explain(NAME_FIELD, model) },
         modifier = Modifier.fillMaxWidth(),
     )
@@ -544,7 +544,7 @@ private fun Form(
                     )
                     Button(
                         onClick = model::startCalibration,
-                        enabled = screen.id != null && !screen.saving && !dirty && live,
+                        enabled = screen.id != null && !screen.busy && !dirty && live,
                     ) {
                         Text("Recalibrate")
                     }

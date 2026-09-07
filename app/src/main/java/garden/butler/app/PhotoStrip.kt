@@ -104,7 +104,7 @@ fun PhotoStrip(screen: Screen.Pot, pot: Pot?, model: GardenViewModel) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             } else {
-                val ordered = strip(photos)
+                val ordered = oldestFirst(photos)
                 val breaks = speciesBreaks(photos)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     pot?.care?.imageUrl?.let { reference ->

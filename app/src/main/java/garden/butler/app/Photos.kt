@@ -48,7 +48,7 @@ fun fitted(w: Int, h: Int, cap: Int = PHOTO_LONG_EDGE): Pair<Int, Int> {
 
 /** The strip's order: oldest first, so it reads left to right as the plant
  * grew. The wire is newest first, like every other list here. */
-fun strip(photos: List<Photo>): List<Photo> = photos.sortedWith(compareBy({ it.ts }, { it.id }))
+fun oldestFirst(photos: List<Photo>): List<Photo> = photos.sortedWith(compareBy({ it.ts }, { it.id }))
 
 /** Where one plant ended and the next began, as the ids the strip should
  * put a mark before.
@@ -59,7 +59,7 @@ fun strip(photos: List<Photo>): List<Photo> = photos.sortedWith(compareBy({ it.t
  * leaves no trace, and neither does a plant that was never named. The first
  * photograph is never a break; it is where the strip starts. */
 fun speciesBreaks(photos: List<Photo>): Set<String> {
-    val ordered = strip(photos)
+    val ordered = oldestFirst(photos)
     val breaks = mutableSetOf<String>()
     var previous: String? = null
     ordered.forEachIndexed { i, photo ->

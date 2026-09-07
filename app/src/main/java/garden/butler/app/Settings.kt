@@ -106,7 +106,7 @@ sealed interface Probe {
 
 /** `GET /hello`, classified. Pure, so every branch has a test that does not
  * need a socket. */
-fun readHello(code: Int, body: String): Probe {
+fun classifyHello(code: Int, body: String): Probe {
     val text = body.trim()
     return when {
         code == 401 -> Probe.WrongToken

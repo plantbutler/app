@@ -279,16 +279,16 @@ class ChartWindowTest {
     @Test
     fun `the scrub lands on the nearest real sample, never between two`() {
         val series = listOf(listOf(Sample(1000, 40.0), Sample(2000, 50.0), Sample(3000, 60.0)))
-        assertEquals(Sample(1000, 40.0), scrubbed(series, 0.0, 1000, 3000))
-        assertEquals(Sample(3000, 60.0), scrubbed(series, 1.0, 1000, 3000))
-        assertEquals(Sample(2000, 50.0), scrubbed(series, 0.5, 1000, 3000))
+        assertEquals(Sample(1000, 40.0), sampleNearest(series, 0.0, 1000, 3000))
+        assertEquals(Sample(3000, 60.0), sampleNearest(series, 1.0, 1000, 3000))
+        assertEquals(Sample(2000, 50.0), sampleNearest(series, 0.5, 1000, 3000))
         // Just past the midpoint is still the nearer of the two, not a mean.
-        assertEquals(Sample(2000, 50.0), scrubbed(series, 0.6, 1000, 3000))
+        assertEquals(Sample(2000, 50.0), sampleNearest(series, 0.6, 1000, 3000))
         // Off the ends clamps rather than returning nothing.
-        assertEquals(Sample(1000, 40.0), scrubbed(series, -2.0, 1000, 3000))
-        assertEquals(Sample(3000, 60.0), scrubbed(series, 9.0, 1000, 3000))
-        assertNull(scrubbed(emptyList(), 0.5, 1000, 3000))
-        assertNull(scrubbed(listOf(emptyList()), 0.5, 1000, 3000))
+        assertEquals(Sample(1000, 40.0), sampleNearest(series, -2.0, 1000, 3000))
+        assertEquals(Sample(3000, 60.0), sampleNearest(series, 9.0, 1000, 3000))
+        assertNull(sampleNearest(emptyList(), 0.5, 1000, 3000))
+        assertNull(sampleNearest(listOf(emptyList()), 0.5, 1000, 3000))
     }
 
     @Test

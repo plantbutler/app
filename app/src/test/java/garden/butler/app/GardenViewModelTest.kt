@@ -605,7 +605,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
         assertEquals("mint is another pot's name", form.refused)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -637,7 +637,7 @@ class GardenViewModelTest {
         // The user keeps typing while the backend has not answered: the open
         // form's draft no longer matches what was posted. Keyed on the name,
         // the outcome would never find its form and the screen would sit on
-        // saving = true for good.
+        // busy = true for good.
         onMain { edit("name", "yet_another_name") }
         gate.countDown()
         waitFor("the list") { model.screen.value.takeIf { it == Screen.List } }
@@ -670,7 +670,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
         assertEquals("basil already exists — open it from the list", form.refused)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -683,7 +683,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the note") { (model.screen.value as? Screen.Pot)?.takeIf { it.note != null } }
         assertEquals("set the pot to manual first — the rules would water a sensor held in the air", form.note)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -701,7 +701,7 @@ class GardenViewModelTest {
         assertIs<CalState.SpeedingUp>(wizard.cal)
         assertNull(wizard.cal.prevNextS)
         assertEquals("pot-1", wizard.parent.id)
-        assertEquals(false, wizard.parent.saving)
+        assertEquals(false, wizard.parent.busy)
     }
 
     @Test
@@ -783,7 +783,7 @@ class GardenViewModelTest {
             save()
         }
         waitFor("the POST in flight") { butler.sent("/pot").firstOrNull() }
-        // Back would restore this very snapshot, saving and all, and the
+        // Back would restore this very snapshot, busy and all, and the
         // save's outcome lands on whatever form is shown — not this one.
         onMain { openDoses("pot-1", "basil's water") }
         assertEquals(true, model.screen.value is Screen.Pot)
@@ -1284,7 +1284,7 @@ class GardenViewModelTest {
             form.waterRefused,
         )
         assertNull(form.watering)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(setOf("/command"), butler.posts().map { it.path }.toSet())
         waitFor("the refresh after it") { butler.sent("/pots").getOrNull(1) }
         gate.countDown()
@@ -1303,7 +1303,7 @@ class GardenViewModelTest {
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.waterRefused != null } }
         assertEquals("busy: cmd=3 state=sent", form.waterRefused)
         assertNull(form.watering)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(1, butler.posts().size)
         butler.slot = """{"id": 3, "state": "sent"}"""
         gate.countDown()
@@ -1353,7 +1353,7 @@ class GardenViewModelTest {
         val issued = assertNotNull(form.watering)
         assertEquals(17, issued.id)
         assertEquals(true, issued.ts in butler.nowS..butler.nowS + 5)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertNull(form.waterRefused)
         waitFor("the refresh after it") { butler.sent("/pots").getOrNull(1) }
         settled()
@@ -1370,7 +1370,7 @@ class GardenViewModelTest {
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.waterRefused != null } }
         assertEquals("a proposal is waiting above — approve it or let it expire", form.waterRefused)
         assertNull(form.watering)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals(emptyList(), butler.posts())
     }
 
@@ -1402,7 +1402,7 @@ class GardenViewModelTest {
         }
         val form = waitFor("the refusal") { (model.screen.value as? Screen.Pot)?.takeIf { it.refused != null } }
         assertEquals("refused: x", form.refused)
-        assertEquals(false, form.saving)
+        assertEquals(false, form.busy)
         assertEquals("35", form.draft["target_low_pct"])
     }
 }

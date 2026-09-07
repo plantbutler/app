@@ -27,7 +27,7 @@ data class Garden(
 
 /** Every pot the answer carried, in one list again: what the cache stores,
  * since splitting is a screen decision and a cache holds the answer. */
-fun Garden.all(): List<Pot> = pots + env + graveyard
+fun Garden.everyPot(): List<Pot> = pots + env + graveyard
 
 /** The pot as the last good read has it; null once it vanished, in which
  * case the open form keeps rendering from its own snapshot. Every screen
@@ -381,7 +381,7 @@ fun needsVerdict(d: LastDose?, nowS: Long): Boolean {
 }
 
 /** The nudge under a pot's row while its last dose waits for a verdict. */
-fun rowNote(pot: Pot, nowS: Long): String? {
+fun verdictNudge(pot: Pot, nowS: Long): String? {
     if (pot.status != ALIVE) return null
     val dose = pot.lastDose?.takeIf { needsVerdict(it, nowS) } ?: return null
     val ts = dose.ackedTs ?: dose.sentTs ?: return null

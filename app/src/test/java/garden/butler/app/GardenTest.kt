@@ -797,15 +797,15 @@ class GardenTest {
     @Test
     fun `the row note nags for a verdict and otherwise stays quiet`() {
         val judged = Pot(name = "basil", lastDose = dose(ackedTs = 1000))
-        assertEquals("dose 2h ago, not judged yet", rowNote(judged, 1000 + 2 * 3600))
-        assertNull(rowNote(judged, 1000 + 60))
-        assertNull(rowNote(Pot(name = "basil"), 5000))
+        assertEquals("dose 2h ago, not judged yet", verdictNudge(judged, 1000 + 2 * 3600))
+        assertNull(verdictNudge(judged, 1000 + 60))
+        assertNull(verdictNudge(Pot(name = "basil"), 5000))
     }
 
     @Test
     fun `a buried pot is never nagged`() {
         val off = Pot(name = "basil", status = GRAVEYARD, lastDose = dose(ackedTs = 1000))
-        assertNull(rowNote(off, 1000 + 2 * 3600))
+        assertNull(verdictNudge(off, 1000 + 2 * 3600))
     }
 
     @Test

@@ -75,15 +75,15 @@ class PhotosTest {
     @Test
     fun `the strip runs oldest first, the wire newest first`() {
         val wire = listOf(photo("c", 300), photo("b", 200), photo("a", 100))
-        assertEquals(listOf("a", "b", "c"), strip(wire).map { it.id })
+        assertEquals(listOf("a", "b", "c"), oldestFirst(wire).map { it.id })
     }
 
     @Test
     fun `two pictures in the same second still have an order`() {
         // Otherwise the strip shuffles itself between refreshes.
         val wire = listOf(photo("b", 100), photo("a", 100))
-        assertEquals(listOf("a", "b"), strip(wire).map { it.id })
-        assertEquals(listOf("a", "b"), strip(wire.reversed()).map { it.id })
+        assertEquals(listOf("a", "b"), oldestFirst(wire).map { it.id })
+        assertEquals(listOf("a", "b"), oldestFirst(wire.reversed()).map { it.id })
     }
 
     @Test

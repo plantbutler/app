@@ -361,7 +361,7 @@ private fun PotRow(
                         color = MaterialTheme.colorScheme.tertiary,
                     )
                 }
-                rowNote(pot, nowS)?.let {
+                verdictNudge(pot, nowS)?.let {
                     Text(
                         it,
                         style = MaterialTheme.typography.labelSmall,

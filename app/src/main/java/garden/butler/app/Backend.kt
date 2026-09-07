@@ -387,7 +387,7 @@ class Backend(config: ButlerConfig = ButlerConfig("", "")) {
                     .header("X-Token", candidate.token)
                     .build()
             client.newCall(request).execute().use { answer ->
-                readHello(answer.code, answer.body?.string().orEmpty())
+                classifyHello(answer.code, answer.body?.string().orEmpty())
             }
         } catch (why: IllegalArgumentException) {
             // Deliberately NOT why.message: OkHttp quotes the offending

@@ -79,13 +79,13 @@ class DosesTest {
 
     @Test
     fun `an unattributable dose says so instead of borrowing a name`() {
-        assertEquals("basil", doseWho(dose()))
-        assertEquals("no pot on that hose then", doseWho(dose(potName = null)))
+        assertEquals("basil", doseOwnerLine(dose()))
+        assertEquals("no pot on that hose then", doseOwnerLine(dose(potName = null)))
         // Never handed out is not the same as "the windows say nobody was
         // there": there is simply nothing to attribute yet.
         assertEquals(
             "not handed out yet",
-            doseWho(dose(potName = null, state = "queued", sentTs = null, ackedTs = null)),
+            doseOwnerLine(dose(potName = null, state = "queued", sentTs = null, ackedTs = null)),
         )
     }
 
