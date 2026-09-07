@@ -125,10 +125,10 @@ fun stillFollowing(issued: Issued?, status: WaterStatus?, nowS: Long): Boolean {
 fun staleLine(cachedAtS: Long, nowS: Long): String =
     "the butler is not answering — this is what it last said, ${agoText(cachedAtS, nowS)}"
 
-/** The one confirmation the pitch allows: what is about to happen and what
- * the rules will make of it. Nothing about what might go wrong — a failure
- * that has not happened is noise, and the status line under the button says
- * so if and when it does. */
+/** The one confirmation shown: what is about to happen and what the rules
+ * will make of it. Nothing about what might go wrong — a failure that has
+ * not happened is noise, and the status line under the button says so if
+ * and when it does. */
 fun waterDialogText(pot: Pot): String =
     "Water ${pot.name} with ${pot.doseMl ?: "?"} ml on " +
         "${pot.controller?.let { boardName(it) } ?: "?"} outlet " +

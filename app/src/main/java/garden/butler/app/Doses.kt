@@ -27,9 +27,9 @@ fun flowedShort(dose: Dose): Boolean {
 }
 
 /** Why this row is worth a second look, or null when it is an ordinary
- * dose. The pitch's own rabbit hole: the interesting row is the one that
- * expired, was never acked, or flowed short, and it has to read
- * differently rather than be filtered out. */
+ * dose: the interesting row is the one that expired, was never acked, or
+ * flowed short, and it has to read differently rather than be filtered
+ * out. */
 fun doseTrouble(dose: Dose): String? =
     when {
         dose.state == "expired" ->

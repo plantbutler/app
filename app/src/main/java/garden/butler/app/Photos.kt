@@ -11,11 +11,10 @@ const val PHOTOS_LIMIT = 200
 
 /** What the long edge is shrunk to before anything is uploaded.
  *
- * The pitch's first rabbit hole: a phone photo is several megabytes and the
- * NAS volume and its backup were never sized for hundreds of them. 1600 is
- * more than a phone screen shows and about 300-500 KB as a JPEG, so a
- * decade of weekly pictures is a couple of hundred megabytes rather than a
- * couple of dozen gigabytes. */
+ * A phone photo is several megabytes and the NAS volume and its backup were
+ * never sized for hundreds of them. 1600 is more than a phone screen shows
+ * and about 300-500 KB as a JPEG, so a decade of weekly pictures is a
+ * couple of hundred megabytes rather than a couple of dozen gigabytes. */
 const val PHOTO_LONG_EDGE = 1600
 
 /** JPEG quality on the way out. High enough that nobody can see the
